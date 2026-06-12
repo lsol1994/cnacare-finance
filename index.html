@@ -2219,11 +2219,67 @@ function delExp(id) {
 }
  
 function changeExpStatus(id, status) {
-  const t=expReqs.find(x=>x.id===id);
-  if(t){ t.status=status; fsSet(COL.expReqs,id,t); }
+  const t = expReqs.find(x=>x.id===id);
+  if(!t) return;
+  const prevStatus = t.status;
+  t.status = status;
+  fsSet(COL.expReqs, id, t);
+
+  /* ── 지급완료 시 자동 연동 ── */
+  if(status === '지급완료' && prevStatus !== '지급완료') {
+    const method = t.method || '계좌이체';
+
+    if(method === '계좌이체' || method === '현금' || method === '수표') {
+      /* 입출금 내역에 출금으로 추가 */
+      const bankName = t.bank ? t.bank + (t.account ? ' ' + t.account.slice(-4) : '') : (bankAccs[0] ? bankAccs[0].bank + ' ' + bankAccs[0].number.slice(-4) : '');
+      const newLedger = {
+        id: nxId++,
+        date: t.payDate,
+        type: 'expense',
+        amount: t.amount,
+        balance: 0,
+        desc: `[지출결의] ${t.title} - ${t.payee}`,
+        acct: t.acct || autoClassify(t.title),
+        bank: bankName,
+        note: `지출결의서 자동반영 (${method})`,
+        linkedExpId: id,
+      };
+      ledger.unshift(newLedger);
+      ledger.sort((a,b) => b.date.localeCompare(a.date));
+      fsSet(COL.ledger, newLedger.id, newLedger);
+      renderL();
+      toast(`지급완료 처리 → 입출금 내역에 출금 자동 추가됨`, 'ok');
+
+    } else if(method === '카드') {
+      /* 법인카드 내역에 추가 */
+      const cardName = cardRegs.length ? cardRegs[0].issuer + ' ' + cardRegs[0].num : '';
+      const newCard = {
+        id: nxCard++,
+        date: t.payDate,
+        paymo: t.payDate.slice(0, 7),
+        merchant: t.payee,
+        item: t.title,
+        amount: t.amount,
+        card: cardName,
+        biztype: '업무',
+        acct: t.acct || autoClassify(t.title),
+        status: '처리완료',
+        note: `지출결의서 자동반영`,
+        linkedExpId: id,
+      };
+      cards.unshift(newCard);
+      cards.sort((a,b) => b.date.localeCompare(a.date));
+      fsSet(COL.cards, newCard.id, newCard);
+      renderC();
+      toast(`지급완료 처리 → 법인카드 내역에 자동 추가됨`, 'ok');
+    }
+
+    updBadges();
+  }
+
   renderExp(); renderExpToday(); updBadges();
   if(document.getElementById('p-dashboard').classList.contains('active')) renderDashboard();
-  toast(`상태가 '${status}'로 변경되었습니다.`,'ok');
+  if(status !== '지급완료') toast(`상태가 '${status}'로 변경되었습니다.`, 'ok');
 }
  
 function openExpView(id) {
@@ -2243,6 +2299,15 @@ function openExpView(id) {
       <div class="ev-row"><span class="ev-label">계정과목</span><span class="ev-val"><span class="at ${acctColor(t.acct)}">${t.acct||'미분류'}</span></span></div>
       <div class="ev-row"><span class="ev-label">지출내용</span><span class="ev-val" style="white-space:pre-line">${t.desc}</span></div>
       ${t.note?`<div class="ev-row"><span class="ev-label">비고</span><span class="ev-val">${t.note}</span></div>`:''}
+      ${t.status==='승인'?(()=>{
+        const m=t.method||'계좌이체';
+        const isLedger=m==='계좌이체'||m==='현금'||m==='수표';
+        const isCard=m==='카드';
+        const icon=isLedger?'⇄ 입출금 내역':isCard?'💳 법인카드 내역':'';
+        return icon?`<div style="margin-top:10px;padding:9px 12px;background:var(--PU);border-radius:var(--r2);font-size:12px;color:var(--P)">
+          💡 <strong>지급완료</strong> 처리 시 <strong>${icon}</strong>에 자동으로 반영됩니다
+        </div>`:'';
+      })():''}
     </div>`;
   document.getElementById('exp-view-footer').innerHTML=`
     <button class="btn" onclick="closeMo('mo-exp-view')">닫기</button>
