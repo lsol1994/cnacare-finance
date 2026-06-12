@@ -302,12 +302,21 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
       </div>
     </div>
   </div>
-  <div class="sb-foot">최종 업데이트: <span id="sb-date">-</span></div>
+  <div class="sb-foot">
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+      <span id="fs-dot" style="width:8px;height:8px;border-radius:50%;background:#999;flex-shrink:0;transition:background .3s"></span>
+      <span id="fs-status" style="font-size:11px">연결 확인 중...</span>
+    </div>
+    최종 업데이트: <span id="sb-date">-</span>
+  </div>
 </aside>
  
 <!-- MOBILE TOPBAR -->
 <header class="topbar">
-  <div><div class="tb-logo">씨앤에이케어</div><div class="tb-sub">재무관리 시스템</div></div>
+  <div style="display:flex;align-items:center;gap:8px">
+    <div><div class="tb-logo">씨앤에이케어</div><div class="tb-sub">재무관리 시스템</div></div>
+    <span id="fs-dot-m" style="width:8px;height:8px;border-radius:50%;background:#999;transition:background .3s"></span>
+  </div>
   <button class="tb-btn" onclick="fabAction()">＋</button>
 </header>
  
@@ -1037,11 +1046,32 @@ function hideLoading() {
   const el=document.getElementById('db-loading');
   if(el) el.remove();
 }
- 
+
+/* ═══════ 연결 상태 표시 ═══════ */
+function setConnStatus(state) {
+  // state: 'ok' | 'fail' | 'checking'
+  const dot  = document.getElementById('fs-dot');
+  const dotM = document.getElementById('fs-dot-m');
+  const txt  = document.getElementById('fs-status');
+  const config = {
+    ok:       { color:'#22C55E', text:'🟢 Firestore 연결됨' },
+    fail:     { color:'#EF4444', text:'🔴 연결 안됨 (오프라인)' },
+    checking: { color:'#FACC15', text:'🟡 연결 확인 중...' },
+  }[state] || { color:'#999', text:'알 수 없음' };
+  if(dot)  dot.style.background  = config.color;
+  if(dotM) dotM.style.background = config.color;
+  if(txt)  txt.textContent = config.text.replace(/^[🟢🔴🟡] /,'');
+}
+
 /* ═══════ 앱 초기화 - Firestore에서 전체 데이터 로드 ═══════ */
 async function initApp() {
   showLoading('씨앤에이케어 재무관리를 불러오는 중...');
+  setConnStatus('checking');
   try {
+    /* 연결 테스트 - settings 컬렉션 1회 읽기로 검증 */
+    await db.collection(COL.settings).limit(1).get();
+    setConnStatus('ok');
+
     /* 병렬 로드 */
     const [lSnap, tSnap, cSnap, baSnap, crSnap, erSnap, stSnap] = await Promise.all([
       fsGetAll(COL.ledger),
@@ -1082,6 +1112,7 @@ async function initApp() {
  
   } catch(e) {
     console.error('initApp error:', e);
+    setConnStatus('fail');
     toast('데이터 로드 실패. 오프라인 모드로 실행합니다.','err');
     /* 오프라인 fallback - 기본 샘플 데이터 */
     ledger = [
@@ -2620,6 +2651,7 @@ firebase.auth().signInAnonymously()
   .then(() => initApp())
   .catch(e => {
     console.error('익명 인증 실패:', e);
+    setConnStatus('fail');
     toast('인증 실패. 새로고침 해주세요.', 'err');
     hideLoading();
   });
