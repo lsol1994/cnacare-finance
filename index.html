@@ -903,6 +903,7 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
 <div class="twr" id="twr"></div>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script>
 const firebaseConfig = {
   apiKey: "AIzaSyAp4hkcCzchjECghxoWfP7JYH8aJgVpYZk",
@@ -2550,7 +2551,13 @@ function updSbDate() {
 }
  
 /* ═══════ INIT ═══════ */
-initApp();
+firebase.auth().signInAnonymously()
+  .then(() => initApp())
+  .catch(e => {
+    console.error('익명 인증 실패:', e);
+    toast('인증 실패. 새로고침 해주세요.', 'err');
+    hideLoading();
+  });
 </script>
 </body>
 </html>
