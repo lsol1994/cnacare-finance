@@ -1392,30 +1392,101 @@ function parseBankFile(file) {
     }
     if(!bankPvw.length){ showErr('bank','파싱된 거래내역이 없습니다.'); return; }
     document.getElementById('bank-err').style.display='none';
-    document.getElementById('bank-pvw-cnt').textContent=`${bankPvw.length}건 파싱됨`;
-    document.getElementById('bank-pvw-tbl').innerHTML=`<table><thead><tr><th>날짜</th><th>구분</th><th>내용</th><th style="text-align:right">금액</th><th>계정과목</th></tr></thead><tbody>
-      ${bankPvw.slice(0,15).map(t=>`<tr><td>${t.date}</td><td><span class="badge ${t.type==='income'?'bi':'be'}">${t.type==='income'?'입금':'출금'}</span></td>
-        <td style="max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.desc}</td>
-        <td style="text-align:right;font-family:'JetBrains Mono',monospace">${fmt(t.amount)}</td>
-        <td><span class="at ${acctColor(t.acct)}">${t.acct}</span></td></tr>`).join('')}
-      ${bankPvw.length>15?`<tr><td colspan="5" style="text-align:center;color:var(--tm);font-size:11px">외 ${bankPvw.length-15}건...</td></tr>`:''}
-    </tbody></table>`;
+
+    // 각 항목에 중복 여부 + 기본 선택 상태 표시
+    bankPvw.forEach((r,i)=>{
+      const isExpDup = r.type==='expense' && ledger.find(t=>t.linkedExpId&&t.date===r.date&&t.amount===r.amount);
+      const isLedgerDup = !isExpDup && ledger.find(t=>t.date===r.date&&t.amount===r.amount&&t.type===r.type&&t.desc===r.desc);
+      r._idx       = i;
+      r._isExpDup  = !!isExpDup;
+      r._isDup     = !!isLedgerDup;
+      r._checked   = !isExpDup && !isLedgerDup; // 중복이면 기본 체크 해제
+    });
+
+    function renderBankPvwTable() {
+      const checked  = bankPvw.filter(r=>r._checked).length;
+      const expSkip  = bankPvw.filter(r=>r._isExpDup && !r._checked).length;
+      const dupSkip  = bankPvw.filter(r=>r._isDup && !r._checked).length;
+
+      document.getElementById('bank-pvw-cnt').innerHTML =
+        `<span style="color:var(--G);font-weight:700">${checked}건 추가 예정</span>` +
+        (expSkip ? ` &nbsp;·&nbsp; <span style="color:var(--O)">⚠ ${expSkip}건 지출결의 건너뜀</span>` : '') +
+        (dupSkip ? ` &nbsp;·&nbsp; <span style="color:var(--tm)">${dupSkip}건 중복 건너뜀</span>` : '') +
+        `&nbsp; <button class="btn sm" onclick="bankPvwToggleAll(true)" style="margin-left:6px">전체 선택</button>` +
+        `<button class="btn sm" onclick="bankPvwToggleAll(false)" style="margin-left:4px">전체 해제</button>`;
+
+      document.getElementById('bank-pvw-tbl').innerHTML = `
+        <table>
+          <thead><tr>
+            <th style="width:28px;text-align:center"><input type="checkbox" id="bank-chk-all" onchange="bankPvwToggleAll(this.checked)" ${bankPvw.every(r=>r._checked)?'checked':''}></th>
+            <th style="width:84px">날짜</th>
+            <th style="width:44px">구분</th>
+            <th>내용</th>
+            <th style="text-align:right;width:100px">금액</th>
+            <th style="width:120px">비고</th>
+          </tr></thead>
+          <tbody>
+          ${bankPvw.map(r=>{
+            const isExp = r._isExpDup;
+            const isDup = r._isDup;
+            let rowBg = '';
+            let badge = `<span class="at ${acctColor(r.acct)}">${r.acct}</span>`;
+            if(isExp && !r._checked){
+              rowBg = 'background:#FEF3C7';
+              badge = `<span style="font-size:10px;background:#FEF3C7;color:#92400E;padding:1px 6px;border-radius:8px;border:1px solid #FCD34D">지출결의 중복</span>`;
+            } else if(isDup && !r._checked){
+              rowBg = 'background:var(--sf2)';
+              badge = `<span style="font-size:10px;color:var(--tm)">중복</span>`;
+            } else if((isExp||isDup) && r._checked){
+              rowBg = 'background:#F0FDF4'; // 체크 복원 시 초록 배경
+              badge = `<span style="font-size:10px;color:var(--G)">✓ 추가 선택됨</span>`;
+            }
+            return `<tr style="${rowBg}">
+              <td style="text-align:center"><input type="checkbox" data-bidx="${r._idx}" ${r._checked?'checked':''} onchange="bankPvwToggle(${r._idx},this.checked)"></td>
+              <td class="dn">${r.date}</td>
+              <td><span class="badge ${r.type==='income'?'bi':'be'}">${r.type==='income'?'입':'출'}</span></td>
+              <td style="font-size:12px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap${(!r._checked&&(isExp||isDup))?';color:var(--tm);text-decoration:line-through':''}">${r.desc}</td>
+              <td style="text-align:right;font-family:'JetBrains Mono',monospace;font-size:12px${(!r._checked&&(isExp||isDup))?';color:var(--tm);text-decoration:line-through':''}">${fmt(r.amount)}</td>
+              <td>${badge}</td>
+            </tr>`;
+          }).join('')}
+          </tbody>
+        </table>`;
+    }
+
+    window.bankPvwToggle = function(idx, checked) {
+      bankPvw[idx]._checked = checked;
+      renderBankPvwTable();
+    };
+    window.bankPvwToggleAll = function(checked) {
+      bankPvw.forEach(r=>r._checked=checked);
+      renderBankPvwTable();
+    };
+
+    renderBankPvwTable();
     document.getElementById('bank-pvw').style.display='block';
   } catch(err){ showErr('bank','파일 읽기 오류: '+err.message); }};
   r.readAsArrayBuffer(file);
 }
 function importBank() {
-  let add=0,skip=0;
+  let add=0, skip=0;
   const newItems=[];
+
   bankPvw.forEach(r=>{
-    if(ledger.find(t=>t.date===r.date&&t.amount===r.amount&&t.type===r.type&&t.desc===r.desc)){ skip++; return; }
-    const item={id:nxId++,...r}; ledger.push(item); newItems.push(item); add++;
+    if(!r._checked){ skip++; return; }  // 체크 해제된 항목은 모두 건너뜀
+    const item={id:nxId++,...r};
+    // _idx, _isExpDup, _isDup, _checked 등 내부 플래그 제거 후 저장
+    delete item._idx; delete item._isExpDup; delete item._isDup; delete item._checked;
+    ledger.push(item); newItems.push(item); add++;
   });
+
   ledger.sort((a,b)=>b.date.localeCompare(a.date));
-  // Firestore 일괄 저장
   newItems.forEach(item=>fsSet(COL.ledger,item.id,item));
   closeMo('mo-bank-up'); renderL(); updBadges(); updSbDate();
-  toast(`${add}건 추가됨${skip?` (${skip}건 중복 건너뜀)`:''}`,'ok');
+
+  let msg = `${add}건 추가됨`;
+  if(skip) msg += ` · ${skip}건 건너뜀`;
+  toast(msg, 'ok');
 }
 function expL(fmt2) {
   const rows=getLF(); if(!rows.length){ toast('내보낼 데이터가 없습니다.','err'); return; }
