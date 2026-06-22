@@ -2257,7 +2257,7 @@ const expStatusClass = {대기:'est-wait',승인:'est-ok',지급완료:'est-paid
  
 function openExpAdd(id) {
   editExpId = id||null;
-  const t = id ? expReqs.find(x=>x.id===id) : null;
+  const t = id ? expReqs.find(x=>x.id==id) : null;
   document.getElementById('me-title').textContent = id ? '지출결의서 수정' : '지출결의서 작성';
   const today = new Date().toISOString().slice(0,10);
   document.getElementById('ef-draft-date').value = t ? t.draftDate : today;
@@ -2299,7 +2299,7 @@ function saveExp() {
     note:    document.getElementById('ef-note').value,
   };
   if(editExpId){
-    const i=expReqs.findIndex(t=>t.id===editExpId);
+    const i=expReqs.findIndex(t=>t.id==editExpId);
     if(i>=0){ expReqs[i]={...expReqs[i],...obj}; fsSet(COL.expReqs,editExpId,expReqs[i]); }
     toast('수정되었습니다.','ok');
   } else {
@@ -2315,25 +2315,31 @@ function saveExp() {
  
 function delExp(id) {
   if(!confirm('지출결의서를 삭제하시겠습니까?')) return;
-  expReqs=expReqs.filter(t=>t.id!==id);
+  expReqs=expReqs.filter(t=>t.id!=id);
   fsDel(COL.expReqs,id);
   renderExp(); renderExpToday(); updBadges(); toast('삭제되었습니다.');
 }
  
 function changeExpStatus(id, status) {
-  const t = expReqs.find(x=>x.id===id);
-  if(!t) return;
+  // id 타입 불일치 방지: 숫자·문자열 모두 매칭
+  const t = expReqs.find(x=>x.id==id);
+  if(!t) {
+    console.error('changeExpStatus: id를 찾을 수 없음', id, expReqs.map(x=>x.id));
+    toast('지출결의서를 찾을 수 없습니다. 새로고침 후 다시 시도해주세요.','err');
+    return;
+  }
   const prevStatus = t.status;
   t.status = status;
-  fsSet(COL.expReqs, id, t);
+  fsSet(COL.expReqs, t.id, t);
 
   /* ── 지급완료 시 자동 연동 ── */
   if(status === '지급완료' && prevStatus !== '지급완료') {
     const method = t.method || '계좌이체';
 
     if(method === '계좌이체' || method === '현금' || method === '수표') {
-      /* 입출금 내역에 출금으로 추가 */
-      const bankName = t.bank ? t.bank + (t.account ? ' ' + t.account.slice(-4) : '') : (bankAccs[0] ? bankAccs[0].bank + ' ' + bankAccs[0].number.slice(-4) : '');
+      const bankName = t.bank
+        ? t.bank + (t.account ? ' ' + t.account.slice(-4) : '')
+        : (bankAccs[0] ? bankAccs[0].bank + ' ' + bankAccs[0].number.slice(-4) : '');
       const newLedger = {
         id: nxId++,
         date: t.payDate,
@@ -2344,16 +2350,15 @@ function changeExpStatus(id, status) {
         acct: t.acct || autoClassify(t.title),
         bank: bankName,
         note: `지출결의서 자동반영 (${method})`,
-        linkedExpId: id,
+        linkedExpId: String(t.id),
       };
       ledger.unshift(newLedger);
       ledger.sort((a,b) => b.date.localeCompare(a.date));
       fsSet(COL.ledger, newLedger.id, newLedger);
       renderL();
-      toast(`지급완료 처리 → 입출금 내역에 출금 자동 추가됨`, 'ok');
+      toast('지급완료 처리 → 입출금 내역에 출금 자동 추가됨', 'ok');
 
     } else if(method === '카드') {
-      /* 법인카드 내역에 추가 */
       const cardName = cardRegs.length ? cardRegs[0].issuer + ' ' + cardRegs[0].num : '';
       const newCard = {
         id: nxCard++,
@@ -2366,14 +2371,14 @@ function changeExpStatus(id, status) {
         biztype: '업무',
         acct: t.acct || autoClassify(t.title),
         status: '처리완료',
-        note: `지출결의서 자동반영`,
-        linkedExpId: id,
+        note: '지출결의서 자동반영',
+        linkedExpId: String(t.id),
       };
       cards.unshift(newCard);
       cards.sort((a,b) => b.date.localeCompare(a.date));
       fsSet(COL.cards, newCard.id, newCard);
       renderC();
-      toast(`지급완료 처리 → 법인카드 내역에 자동 추가됨`, 'ok');
+      toast('지급완료 처리 → 법인카드 내역에 자동 추가됨', 'ok');
     }
 
     updBadges();
@@ -2385,7 +2390,7 @@ function changeExpStatus(id, status) {
 }
  
 function openExpView(id) {
-  const t=expReqs.find(x=>x.id===id); if(!t) return;
+  const t=expReqs.find(x=>x.id==id); if(!t) return;
   const sc=expStatusClass[t.status]||'est-wait';
   document.getElementById('exp-view-body').innerHTML=`
     <div style="padding:2px 0 14px">
