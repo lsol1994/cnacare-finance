@@ -1313,7 +1313,8 @@ function saveL() {
   closeMo('mo-l-add'); renderL(); updBadges(); updSbDate();
 }
 function delL(id) {
-  const item = ledger.find(t=>t.id===id);
+  // id 타입 불일치 방지 (Firestore는 문자열, onclick은 숫자)
+  const item = ledger.find(t=>t.id==id);
   if(!confirm('삭제하시겠습니까?')) return;
 
   // 지출결의서 연동 항목이면 → 지출결의서 상태 '승인'으로 복원 (재등록 가능)
@@ -1323,14 +1324,17 @@ function delL(id) {
       exp.status = '승인';
       fsSet(COL.expReqs, exp.id, exp);
       renderExp(); renderExpToday();
+      if(document.getElementById('p-dashboard').classList.contains('active')) renderDashboard();
       toast('입출금 내역 삭제 → 지출결의서 상태가 승인으로 변경되었습니다. 지급완료 재처리하면 다시 등록됩니다.', 'ok');
+    } else {
+      toast('삭제되었습니다.');
     }
   }
 
-  ledger = ledger.filter(t=>t.id!==id);
+  ledger = ledger.filter(t=>t.id!=id);
   fsDel(COL.ledger, id);
   renderL(); updBadges();
-  if(!item?.linkedExpId) toast('삭제되었습니다.');
+  if(!item || !item.linkedExpId) toast('삭제되었습니다.');
 }
 function openLAcct(id) {
   editLAId=id;
