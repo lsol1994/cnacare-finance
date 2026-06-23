@@ -1313,8 +1313,24 @@ function saveL() {
   closeMo('mo-l-add'); renderL(); updBadges(); updSbDate();
 }
 function delL(id) {
+  const item = ledger.find(t=>t.id===id);
   if(!confirm('삭제하시겠습니까?')) return;
-  ledger=ledger.filter(t=>t.id!==id); fsDel(COL.ledger,id); renderL(); updBadges(); toast('삭제되었습니다.');
+
+  // 지출결의서 연동 항목이면 → 지출결의서 상태 '승인'으로 복원 (재등록 가능)
+  if(item && item.linkedExpId) {
+    const exp = expReqs.find(x=>x.id==item.linkedExpId);
+    if(exp && exp.status==='지급완료') {
+      exp.status = '승인';
+      fsSet(COL.expReqs, exp.id, exp);
+      renderExp(); renderExpToday();
+      toast('입출금 내역 삭제 → 지출결의서 상태가 승인으로 변경되었습니다. 지급완료 재처리하면 다시 등록됩니다.', 'ok');
+    }
+  }
+
+  ledger = ledger.filter(t=>t.id!==id);
+  fsDel(COL.ledger, id);
+  renderL(); updBadges();
+  if(!item?.linkedExpId) toast('삭제되었습니다.');
 }
 function openLAcct(id) {
   editLAId=id;
@@ -1404,12 +1420,13 @@ function parseBankFile(file) {
 
     // 각 항목에 중복 여부 + 기본 선택 상태 표시
     bankPvw.forEach((r,i)=>{
-      const isExpDup = r.type==='expense' && ledger.find(t=>t.linkedExpId&&t.date===r.date&&t.amount===r.amount);
-      const isLedgerDup = !isExpDup && ledger.find(t=>t.date===r.date&&t.amount===r.amount&&t.type===r.type&&t.desc===r.desc);
-      r._idx       = i;
-      r._isExpDup  = !!isExpDup;
-      r._isDup     = !!isLedgerDup;
-      r._checked   = !isExpDup && !isLedgerDup; // 중복이면 기본 체크 해제
+      // 지출결의서 연동 기존 항목이 입출금에 있는지 확인
+      const expLinked = r.type==='expense' && ledger.find(t=>t.linkedExpId&&t.date===r.date&&t.amount===r.amount);
+      const isLedgerDup = !expLinked && ledger.find(t=>t.date===r.date&&t.amount===r.amount&&t.type===r.type&&t.desc===r.desc);
+      r._idx        = i;
+      r._isExpDup   = !!expLinked;   // 지출결의서 연동 항목이 이미 등록됨
+      r._isDup      = !!isLedgerDup; // 일반 중복
+      r._checked    = !expLinked && !isLedgerDup; // 중복이면 기본 체크 해제
     });
 
     function renderBankPvwTable() {
@@ -1419,7 +1436,7 @@ function parseBankFile(file) {
 
       document.getElementById('bank-pvw-cnt').innerHTML =
         `<span style="color:var(--G);font-weight:700">${checked}건 추가 예정</span>` +
-        (expSkip ? ` &nbsp;·&nbsp; <span style="color:var(--O)">⚠ ${expSkip}건 지출결의 건너뜀</span>` : '') +
+        (expSkip ? ` &nbsp;·&nbsp; <span style="color:var(--O)">⚠ ${expSkip}건 지출결의 등록됨 (건너뜀)</span>` : '') +
         (dupSkip ? ` &nbsp;·&nbsp; <span style="color:var(--tm)">${dupSkip}건 중복 건너뜀</span>` : '') +
         `&nbsp; <button class="btn sm" onclick="bankPvwToggleAll(true)" style="margin-left:6px">전체 선택</button>` +
         `<button class="btn sm" onclick="bankPvwToggleAll(false)" style="margin-left:4px">전체 해제</button>`;
@@ -1442,7 +1459,7 @@ function parseBankFile(file) {
             let badge = `<span class="at ${acctColor(r.acct)}">${r.acct}</span>`;
             if(isExp && !r._checked){
               rowBg = 'background:#FEF3C7';
-              badge = `<span style="font-size:10px;background:#FEF3C7;color:#92400E;padding:1px 6px;border-radius:8px;border:1px solid #FCD34D">지출결의 중복</span>`;
+              badge = `<span style="font-size:10px;background:#FEF3C7;color:#92400E;padding:1px 6px;border-radius:8px;border:1px solid #FCD34D">지출결의 등록됨</span>`;
             } else if(isDup && !r._checked){
               rowBg = 'background:var(--sf2)';
               badge = `<span style="font-size:10px;color:var(--tm)">중복</span>`;
@@ -2346,48 +2363,60 @@ function changeExpStatus(id, status) {
     const method = t.method || '계좌이체';
 
     if(method === '계좌이체' || method === '현금' || method === '수표') {
-      const bankName = t.bank
-        ? t.bank + (t.account ? ' ' + t.account.slice(-4) : '')
-        : (bankAccs[0] ? bankAccs[0].bank + ' ' + bankAccs[0].number.slice(-4) : '');
-      const newLedger = {
-        id: nxId++,
-        date: t.payDate,
-        type: 'expense',
-        amount: t.amount,
-        balance: 0,
-        desc: `[지출결의] ${t.title} - ${t.payee}`,
-        acct: t.acct || autoClassify(t.title),
-        bank: bankName,
-        note: `지출결의서 자동반영 (${method})`,
-        linkedExpId: String(t.id),
-      };
-      ledger.unshift(newLedger);
-      ledger.sort((a,b) => b.date.localeCompare(a.date));
-      fsSet(COL.ledger, newLedger.id, newLedger);
-      renderL();
-      toast('지급완료 처리 → 입출금 내역에 출금 자동 추가됨', 'ok');
+      // 이미 입출금 내역에 이 지출결의서 연동 항목이 있으면 추가하지 않음
+      const alreadyInLedger = ledger.find(l => l.linkedExpId && l.linkedExpId == String(t.id));
+      if(alreadyInLedger) {
+        toast('이미 입출금 내역에 등록되어 있습니다.', 'ok');
+      } else {
+        const bankName = t.bank
+          ? t.bank + (t.account ? ' ' + t.account.slice(-4) : '')
+          : (bankAccs[0] ? bankAccs[0].bank + ' ' + bankAccs[0].number.slice(-4) : '');
+        const newLedger = {
+          id: nxId++,
+          date: t.payDate,
+          type: 'expense',
+          amount: t.amount,
+          balance: 0,
+          desc: `[지출결의] ${t.title} - ${t.payee}`,
+          acct: t.acct || autoClassify(t.title),
+          bank: bankName,
+          note: `지출결의서 자동반영 (${method})`,
+          linkedExpId: String(t.id),
+        };
+        ledger.unshift(newLedger);
+        ledger.sort((a,b) => b.date.localeCompare(a.date));
+        fsSet(COL.ledger, newLedger.id, newLedger);
+        renderL();
+        toast('지급완료 처리 → 입출금 내역에 출금 자동 추가됨', 'ok');
+      }
 
     } else if(method === '카드') {
-      const cardName = cardRegs.length ? cardRegs[0].issuer + ' ' + cardRegs[0].num : '';
-      const newCard = {
-        id: nxCard++,
-        date: t.payDate,
-        paymo: t.payDate.slice(0, 7),
-        merchant: t.payee,
-        item: t.title,
-        amount: t.amount,
-        card: cardName,
-        biztype: '업무',
-        acct: t.acct || autoClassify(t.title),
-        status: '처리완료',
-        note: '지출결의서 자동반영',
-        linkedExpId: String(t.id),
-      };
-      cards.unshift(newCard);
-      cards.sort((a,b) => b.date.localeCompare(a.date));
-      fsSet(COL.cards, newCard.id, newCard);
-      renderC();
-      toast('지급완료 처리 → 법인카드 내역에 자동 추가됨', 'ok');
+      // 이미 카드 내역에 있으면 추가하지 않음
+      const alreadyInCard = cards.find(c => c.linkedExpId && c.linkedExpId == String(t.id));
+      if(alreadyInCard) {
+        toast('이미 법인카드 내역에 등록되어 있습니다.', 'ok');
+      } else {
+        const cardName = cardRegs.length ? cardRegs[0].issuer + ' ' + cardRegs[0].num : '';
+        const newCard = {
+          id: nxCard++,
+          date: t.payDate,
+          paymo: t.payDate.slice(0, 7),
+          merchant: t.payee,
+          item: t.title,
+          amount: t.amount,
+          card: cardName,
+          biztype: '업무',
+          acct: t.acct || autoClassify(t.title),
+          status: '처리완료',
+          note: '지출결의서 자동반영',
+          linkedExpId: String(t.id),
+        };
+        cards.unshift(newCard);
+        cards.sort((a,b) => b.date.localeCompare(a.date));
+        fsSet(COL.cards, newCard.id, newCard);
+        renderC();
+        toast('지급완료 처리 → 법인카드 내역에 자동 추가됨', 'ok');
+      }
     }
 
     updBadges();
