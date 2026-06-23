@@ -2371,12 +2371,19 @@ function changeExpStatus(id, status) {
         const bankName = t.bank
           ? t.bank + (t.account ? ' ' + t.account.slice(-4) : '')
           : (bankAccs[0] ? bankAccs[0].bank + ' ' + bankAccs[0].number.slice(-4) : '');
+
+        // 지급일 기준 직전 거래의 잔액에서 출금액 차감하여 잔액 계산
+        const prevEntry = [...ledger]
+          .filter(l => l.date <= t.payDate && l.balance > 0)
+          .sort((a,b) => b.date.localeCompare(a.date) || b.id - a.id)[0];
+        const calcBalance = prevEntry ? prevEntry.balance - t.amount : 0;
+
         const newLedger = {
           id: nxId++,
           date: t.payDate,
           type: 'expense',
           amount: t.amount,
-          balance: 0,
+          balance: calcBalance > 0 ? calcBalance : 0,
           desc: `[지출결의] ${t.title} - ${t.payee}`,
           acct: t.acct || autoClassify(t.title),
           bank: bankName,
