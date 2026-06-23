@@ -2498,7 +2498,10 @@ function renderExp() {
     <td><span class="at ${acctColor(t.acct)}">${t.acct||'미분류'}</span></td>
     <td class="nm exp">${fmt(t.amount)}</td>
     <td style="text-align:center">${makeStatusBadge(t.status)}</td>
-    <td><button class="btn sm ic" onclick="openExpAdd(${t.id})">✏</button> <button class="btn sm ic d" onclick="delExp(${t.id})">🗑</button></td>
+    <td style="white-space:nowrap">
+      ${(t.status==='대기'||t.status==='승인')?`<button class="btn sm p" style="padding:3px 8px;font-size:11px" onclick="changeExpStatus(${t.id},'지급완료')">💰 지급</button> `:''}
+      <button class="btn sm ic" onclick="openExpAdd(${t.id})">✏</button> <button class="btn sm ic d" onclick="delExp(${t.id})">🗑</button>
+    </td>
   </tr>`).join('');
   if(ca) ca.innerHTML=rows.map(t=>`<div class="txc" onclick="openExpView(${t.id})" style="cursor:pointer">
     <div class="txc-tp"><div class="txc-d">${t.title}</div><div class="txc-a exp">-${fmtS(t.amount)}</div></div>
@@ -2508,6 +2511,7 @@ function renderExp() {
       <span class="at ${acctColor(t.acct)}">${t.acct||'미분류'}</span>
       ${makeStatusBadge(t.status)}
       <div class="txc-ac" onclick="event.stopPropagation()">
+        ${(t.status==='대기'||t.status==='승인')?`<button class="btn sm p" onclick="changeExpStatus(${t.id},'지급완료')">💰 지급</button>`:''}
         <button class="btn sm ic" onclick="openExpAdd(${t.id})">✏</button>
         <button class="btn sm ic d" onclick="delExp(${t.id})">🗑</button>
       </div>
