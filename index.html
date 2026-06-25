@@ -2312,6 +2312,30 @@ function openExpAdd(id) {
   document.getElementById('ef-acct').value   = t ? t.acct   : '';
   openMo('mo-exp-add');
 }
+
+/* 지출결의서 복사 - 날짜·상태만 초기화, 나머지 내용 그대로 */
+function openExpCopy(id) {
+  const t = expReqs.find(x=>x.id==id);
+  if(!t) return;
+  editExpId = null; // 새 건으로 저장
+  const today = new Date().toISOString().slice(0,10);
+  document.getElementById('me-title').textContent = '지출결의서 복사 작성';
+  document.getElementById('ef-draft-date').value = today;
+  document.getElementById('ef-pay-date').value   = today;
+  document.getElementById('ef-title').value  = t.title;
+  document.getElementById('ef-payee').value  = t.payee;
+  document.getElementById('ef-bizno').value  = t.bizno  || '';
+  document.getElementById('ef-amount').value = t.amount;
+  document.getElementById('ef-method').value = t.method || '계좌이체';
+  document.getElementById('ef-bank').value   = t.bank   || '';
+  document.getElementById('ef-account').value= t.account|| '';
+  document.getElementById('ef-desc').value   = t.desc;
+  document.getElementById('ef-status').value = '대기';  // 상태 초기화
+  document.getElementById('ef-note').value   = t.note   || '';
+  syncDropdowns();
+  document.getElementById('ef-acct').value   = t.acct   || '';
+  openMo('mo-exp-add');
+}
  
 function saveExp() {
   const draftDate = document.getElementById('ef-draft-date').value;
@@ -2484,6 +2508,7 @@ function openExpView(id) {
     </div>`;
   document.getElementById('exp-view-footer').innerHTML=`
     <button class="btn" onclick="closeMo('mo-exp-view')">닫기</button>
+    <button class="btn" onclick="closeMo('mo-exp-view');openExpCopy(${t.id})">📋 복사</button>
     <button class="btn" onclick="closeMo('mo-exp-view');openExpAdd(${t.id})">✏ 수정</button>
     ${t.status==='대기'?`<button class="btn g" onclick="closeMo('mo-exp-view');changeExpStatus(${t.id},'승인')">✓ 승인</button>`:''}
     ${(t.status==='승인'||t.status==='대기')?`<button class="btn p" onclick="closeMo('mo-exp-view');changeExpStatus(${t.id},'지급완료')">💰 지급완료</button>`:''}
@@ -2528,6 +2553,7 @@ function renderExp() {
     <td style="text-align:center">${makeStatusBadge(t.status)}</td>
     <td style="white-space:nowrap">
       ${(t.status==='대기'||t.status==='승인')?`<button class="btn sm p" style="padding:3px 8px;font-size:11px" onclick="changeExpStatus(${t.id},'지급완료')">💰 지급</button> `:''}
+      <button class="btn sm" style="padding:3px 8px;font-size:11px" onclick="openExpCopy(${t.id})" title="복사하여 새로 작성">📋 복사</button>
       <button class="btn sm ic" onclick="openExpAdd(${t.id})">✏</button> <button class="btn sm ic d" onclick="delExp(${t.id})">🗑</button>
     </td>
   </tr>`).join('');
@@ -2540,6 +2566,7 @@ function renderExp() {
       ${makeStatusBadge(t.status)}
       <div class="txc-ac" onclick="event.stopPropagation()">
         ${(t.status==='대기'||t.status==='승인')?`<button class="btn sm p" onclick="changeExpStatus(${t.id},'지급완료')">💰 지급</button>`:''}
+        <button class="btn sm" onclick="openExpCopy(${t.id})">📋</button>
         <button class="btn sm ic" onclick="openExpAdd(${t.id})">✏</button>
         <button class="btn sm ic d" onclick="delExp(${t.id})">🗑</button>
       </div>
