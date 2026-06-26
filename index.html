@@ -2406,22 +2406,20 @@ function changeExpStatus(id, status) {
           ? t.bank + (t.account ? ' ' + t.account.slice(-4) : '')
           : (bankAccs[0] ? bankAccs[0].bank + ' ' + bankAccs[0].number.slice(-4) : '');
 
-        // 지급일 기준 직전 거래의 잔액에서 출금액 차감
-        // - 날짜 내림차순, 같은 날짜면 id 내림차순으로 정렬 후 첫 번째
-        // - balance가 있는(>0) 항목만 대상
-        // - 새로 추가될 항목(linkedExpId)은 제외하여 중복 참조 방지
-        const prevEntry = [...ledger]
-          .filter(l =>
-            l.date <= t.payDate &&
-            l.balance > 0 &&
-            !l.linkedExpId  // 지출결의 자동생성 항목 제외 (잔액이 계산값이라 연쇄 오류 방지)
-          )
-          .sort((a,b) => {
-            const dc = b.date.localeCompare(a.date);
-            if(dc !== 0) return dc;
-            return Number(b.id) - Number(a.id); // id 문자열→숫자 변환
-          })[0];
-        const calcBalance = prevEntry ? prevEntry.balance - t.amount : 0;
+        // 잔액 계산: 지급일 기준 직전 실제 거래의 잔액 - 출금액
+        // ledger는 날짜 내림차순 정렬 상태
+        // 실제 잔액 = 은행파일 가져오기 항목(linkedExpId 없음)만 신뢰
+        const sorted = [...ledger].sort((a,b) => {
+          const dc = b.date.localeCompare(a.date);
+          return dc !== 0 ? dc : Number(b.id) - Number(a.id);
+        });
+        // 지급일과 같거나 이전 날짜의 실제 은행 거래 중 가장 최신 잔액
+        const baseEntry = sorted.find(l =>
+          !l.linkedExpId &&
+          Number(l.balance) > 0 &&
+          l.date <= t.payDate
+        );
+        const calcBalance = baseEntry ? Number(baseEntry.balance) - Number(t.amount) : 0;
 
         const newLedger = {
           id: nxId++,
@@ -2805,13 +2803,13 @@ function dlBlob(content,type,name) {
 }
 /* ═══════ 시스템 설정 ═══════ */
 function recalcExpLedgerBalance() {
-  // 지출결의 자동생성 항목(linkedExpId 있음) 중 잔액이 0인 것만 재계산
-  const targets = ledger.filter(l => l.linkedExpId && (l.balance === 0 || !l.balance));
+  // linkedExpId 있는 항목 전체 재계산 (잔액 0뿐 아니라 잘못된 것 모두)
+  const targets = ledger.filter(l => l.linkedExpId);
   if(!targets.length) { toast('재계산할 항목이 없습니다.', 'ok'); return; }
 
-  // 은행 파일에서 가져온 실제 잔액 항목만으로 기준점 구성
+  // 실제 은행 거래 항목만 날짜 내림차순으로 정렬
   const realEntries = ledger
-    .filter(l => !l.linkedExpId && l.balance > 0)
+    .filter(l => !l.linkedExpId && Number(l.balance) > 0)
     .sort((a,b) => {
       const dc = b.date.localeCompare(a.date);
       return dc !== 0 ? dc : Number(b.id) - Number(a.id);
@@ -2819,16 +2817,21 @@ function recalcExpLedgerBalance() {
 
   let fixed = 0;
   targets.forEach(item => {
-    const prev = realEntries.find(l => l.date <= item.date);
-    if(prev) {
-      item.balance = prev.balance - item.amount;
-      fsSet(COL.ledger, item.id, item);
-      fixed++;
+    // 지급일과 같거나 이전 날짜의 가장 최신 실제 은행 잔액
+    const base = realEntries.find(l => l.date <= item.date);
+    if(base) {
+      const newBal = Number(base.balance) - Number(item.amount);
+      if(item.balance !== newBal) {
+        item.balance = newBal;
+        fsSet(COL.ledger, item.id, item);
+        fixed++;
+      }
     }
   });
 
   renderL();
-  toast(`${fixed}건의 잔액이 재계산되었습니다.`, 'ok');
+  if(fixed > 0) toast(`${fixed}건의 잔액이 재계산되었습니다.`, 'ok');
+  else toast('모든 잔액이 이미 정확합니다.', 'ok');
 }
 function saveSysInfo() {
   const get = id => (document.getElementById(id)||{}).value || '';
