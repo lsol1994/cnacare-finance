@@ -1185,6 +1185,9 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
       <button class="btn btn-sm" style="border-color:var(--blue);color:var(--blue)" onclick="openDuplicateCgManager()">
         👥 중복 간병인 정리
       </button>
+      <button class="btn btn-sm btn-teal" onclick="mergeAllDuplicateCg()">
+        ⚡ 중복 간병인 전체 일괄 정리
+      </button>
       <button class="btn btn-sm" style="border-color:var(--teal);color:var(--teal)" onclick="checkPayRemind(true)">
         💰 급여 알림 테스트
       </button>
@@ -1555,7 +1558,6 @@ function save() {
       db.ref('cnc').set(payload)
         .then(() => {
           showSyncStatus('저장됨');
-          clearDeletedCgIds(); // 저장 완료 → 삭제 ID 보호 해제
           setTimeout(() => {
             _fbPause = false;
             attachFirebaseListener();
@@ -1660,8 +1662,18 @@ function attachFirebaseListener() {
       localStorage.setItem('cnc_patients', JSON.stringify(patients));
     }
     if(fbCaregivers.length > 0) {
-      // _deletedCgIds에 있는 항목은 Firebase에서 복원하지 않음
-      const filteredFb = fbCaregivers.filter(dc => !getDeletedCgIds().has(String(dc.id)));
+      // 삭제 보호: localStorage에 기록된 ID는 Firebase에서 복원하지 않음
+      const deletedIds = getDeletedCgIds();
+      const filteredFb = deletedIds.size > 0
+        ? fbCaregivers.filter(dc => !deletedIds.has(String(dc.id)))
+        : fbCaregivers;
+
+      // Firebase 데이터에서도 삭제된 ID가 없으면 보호 해제
+      // (Firebase가 새 데이터를 정상 서빙하고 있다는 증거)
+      if(deletedIds.size > 0) {
+        const stillInFb = fbCaregivers.some(dc => deletedIds.has(String(dc.id)));
+        if(!stillInFb) clearDeletedCgIds();
+      }
 
       function mergeCg(fbList) {
         return fbList.map(dc => {
@@ -4862,24 +4874,36 @@ function calcTotalPay(cg) {
   const payPerDay = Number(cg.pay);
   if(!payPerDay) return '';
 
-  const OT_PER_HOUR = 10000; // OT 시간당 요금
+  const OT_PER_HOUR    = 10000; // OT 시간당 요금
+  const DAY_THRESHOLD  = 10;    // 10시간 초과 시 하루 인정
 
   const [sh=8,sm=0] = (cg.startTime||'08:00').split(':').map(Number);
   const [eh=8,em=0] = (cg.endTime  ||'08:00').split(':').map(Number);
   const startMs = parseLocalDate(cg.startDate).getTime() + (sh*60+sm)*60000;
   const endMs   = parseLocalDate(cg.endDate).getTime()   + (eh*60+em)*60000;
-  if(isNaN(startMs)||isNaN(endMs)) return '';
+  if(isNaN(startMs)||isNaN(endMs)||endMs<=startMs) return '';
 
-  const totalMin = Math.round((endMs - startMs) / 60000);
-  if(totalMin <= 0) return '';
+  const totalMin  = Math.round((endMs - startMs) / 60000);
+  const fullDays  = Math.floor(totalMin / (24*60));
+  const remainMin = totalMin % (24*60);
+  const remainH   = remainMin / 60;
 
-  const days   = Math.floor(totalMin / (24*60));
-  const otMin  = totalMin % (24*60);
-  const otHour = Math.floor(otMin / 60);
-  const otMod  = otMin % 60;
+  let days, otHour, otMod;
+  if(remainH >= DAY_THRESHOLD) {
+    // 10시간 초과 → 하루 추가, OT 없음
+    days   = fullDays + 1;
+    otHour = 0;
+    otMod  = 0;
+  } else {
+    // 10시간 이하 → OT 계산
+    days   = fullDays;
+    otHour = Math.floor(remainMin / 60);
+    otMod  = remainMin % 60;
+  }
+
+  if(days <= 0 && otHour <= 0 && otMod <= 0) return '';
 
   const dayPay = payPerDay * days;
-  // OT: 시간 단위만 (분은 절사)
   const otPay  = otHour * OT_PER_HOUR;
   const total  = dayPay + otPay;
 
@@ -4887,7 +4911,7 @@ function calcTotalPay(cg) {
   if(days > 0) {
     result = days + '일 × ' + payPerDay.toLocaleString() + '원 = ' + dayPay.toLocaleString() + '원';
   }
-  if(otMin > 0) {
+  if(otHour > 0 || otMod > 0) {
     const otStr = otHour > 0
       ? otHour + '시간' + (otMod > 0 ? ' ' + otMod + '분' : '')
       : otMod + '분';
@@ -4897,7 +4921,7 @@ function calcTotalPay(cg) {
   if(otHour > 0 && days > 0) {
     result += '\n합계: ' + total.toLocaleString() + '원';
   }
-  return result || '';
+  return result;
 }
 
 // OT 포함 총 시간 텍스트
