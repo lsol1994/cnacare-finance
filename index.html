@@ -1288,6 +1288,26 @@ function syncDropdowns() {
 }
  
 /* ═══════ LEDGER ═══════ */
+function calcAutoBalance(targetDate, targetType, targetAmount, excludeId) {
+  // 날짜+id 오름차순(시간순)으로 정렬
+  const sorted = [...ledger]
+    .filter(l => l.id != excludeId)          // 자기 자신 제외
+    .sort((a,b)=>{
+      const dc = a.date.localeCompare(b.date);
+      return dc !== 0 ? dc : Number(a.id) - Number(b.id);
+    });
+
+  // 대상 날짜보다 이전(또는 같은 날 더 앞)의 잔액이 있는 마지막 실제 항목
+  const prev = [...sorted]
+    .reverse()
+    .find(l => l.date <= targetDate && Number(l.balance) > 0);
+
+  if(!prev) return null; // 기준점 없음
+
+  const base = Number(prev.balance);
+  return targetType === 'income' ? base + Number(targetAmount) : base - Number(targetAmount);
+}
+
 function openLAdd(id) {
   editLId=id||null;
   const t = id ? ledger.find(x=>x.id==id) : null;
@@ -1295,33 +1315,69 @@ function openLAdd(id) {
   document.getElementById('lf-date').value    = t ? t.date   : new Date().toISOString().slice(0,10);
   document.getElementById('lf-iotype').value  = t ? t.type   : 'income';
   document.getElementById('lf-amount').value  = t ? t.amount : '';
-  document.getElementById('lf-balance').value = t ? (t.balance || '') : '';
   document.getElementById('lf-desc').value    = t ? t.desc   : '';
   document.getElementById('lf-note').value    = t ? t.note   : '';
   syncDropdowns();
   document.getElementById('lf-acct').value = t ? t.acct : '';
   document.getElementById('lf-bank').value = t ? t.bank : '';
 
-  // 지출결의서 자동생성 항목이면 잔액 칸 강조
-  const isExpLinked = t && t.linkedExpId;
   const hint  = document.getElementById('lf-balance-hint');
   const label = document.getElementById('lf-balance-label');
   const balEl = document.getElementById('lf-balance');
-  if(isExpLinked) {
-    hint.style.display = '';
-    label.textContent  = '잔액(원) *';
-    label.style.color  = 'var(--O)';
-    balEl.style.borderColor = 'var(--O)';
-    balEl.style.boxShadow   = '0 0 0 2px rgba(194,65,12,.12)';
-    // 모달 열린 후 잔액 칸 자동 포커스
-    setTimeout(() => balEl.focus(), 200);
+  const isExpLinked = t && t.linkedExpId;
+  const hasBalance  = t && Number(t.balance) > 0;
+
+  if(isExpLinked && !hasBalance) {
+    // 지출결의 항목이고 잔액 미입력 → 자동계산 시도
+    const auto = calcAutoBalance(t.date, t.type, t.amount, t.id);
+    balEl.value = auto !== null ? auto : '';
+    hint.style.display  = auto !== null
+      ? 'none'
+      : '';  // 자동계산 실패 시 힌트 표시
+    label.textContent   = '잔액(원)';
+    label.style.color   = auto !== null ? '' : 'var(--O)';
+    balEl.style.borderColor = auto !== null ? '' : 'var(--O)';
+    balEl.style.boxShadow   = auto !== null ? '' : '0 0 0 2px rgba(194,65,12,.12)';
+    if(auto === null) setTimeout(() => balEl.focus(), 200);
   } else {
-    hint.style.display = 'none';
-    label.textContent  = '잔액(원)';
-    label.style.color  = '';
+    // 일반 항목 또는 이미 잔액 있는 지출결의 항목
+    balEl.value = t ? (t.balance || '') : '';
+    // 신규 추가 시 오늘 날짜 기준 최신 잔액 자동 계산
+    if(!t) {
+      const today = new Date().toISOString().slice(0,10);
+      const auto = calcAutoBalance(today, 'expense', 0, null);
+      // 기준 잔액만 표시 (금액 0이므로 실제 계산은 oninput에서)
+      if(auto !== null) {
+        const baseEntry = [...ledger]
+          .filter(l => Number(l.balance) > 0)
+          .sort((a,b)=>{
+            const dc = b.date.localeCompare(a.date);
+            return dc !== 0 ? dc : Number(b.id) - Number(a.id);
+          })[0];
+        if(baseEntry) balEl.placeholder = `직전 잔액: ${fmt(Number(baseEntry.balance))}`;
+      }
+    }
+    hint.style.display  = 'none';
+    label.textContent   = '잔액(원)';
+    label.style.color   = '';
     balEl.style.borderColor = '';
     balEl.style.boxShadow   = '';
   }
+
+  // 금액·일자·구분 변경 시 잔액 자동 재계산
+  ['lf-amount','lf-date','lf-iotype'].forEach(elId => {
+    const el = document.getElementById(elId);
+    if(!el) return;
+    el.oninput = el.onchange = () => {
+      const d = document.getElementById('lf-date').value;
+      const tp = document.getElementById('lf-iotype').value;
+      const amt = parseFloat(document.getElementById('lf-amount').value)||0;
+      if(d && amt) {
+        const auto = calcAutoBalance(d, tp, amt, editLId);
+        if(auto !== null) document.getElementById('lf-balance').value = auto;
+      }
+    };
+  });
 
   openMo('mo-l-add');
 }
@@ -1444,19 +1500,89 @@ function parseBankFile(file) {
   r.onload=e=>{ try {
     const wb=XLSX.read(new Uint8Array(e.target.result),{type:'array'});
     const ws=wb.Sheets[wb.SheetNames[0]];
-    const rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:false});
+    const rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:false,defval:''});
+
+    // ── 헤더 행 자동 탐지 ──
+    // 지원 키워드: '거래일자'(구 신한), '거래일시'(신규 양식)
     let hdr=-1;
-    for(let i=0;i<rows.length;i++) if(rows[i].some(c=>c&&String(c).includes('거래일자'))){hdr=i;break;}
-    if(hdr<0){ showErr('bank','거래일자 컬럼을 찾을 수 없습니다.'); return; }
+    for(let i=0;i<rows.length;i++){
+      if(rows[i].some(c=>c&&(String(c).includes('거래일자')||String(c).includes('거래일시')))){
+        hdr=i; break;
+      }
+    }
+    if(hdr<0){ showErr('bank','거래일자 또는 거래일시 컬럼을 찾을 수 없습니다.'); return; }
+
+    const hdrs = rows[hdr];
+
+    // ── 컬럼 인덱스 자동 탐지 ──
+    const ci = {};
+    hdrs.forEach((h,i)=>{
+      const s = String(h||'').trim();
+      if(s.includes('거래일자')||s.includes('거래일시')) ci.date   = i;
+      if(s==='입금액'||s==='입금')                       ci.inp    = i;
+      if(s==='출금액'||s==='출금')                       ci.out    = i;
+      if(s==='잔액')                                      ci.bal    = i;
+      if(s==='적요')                                      ci.memo   = i;
+      if(s==='내용')                                      ci.desc   = i;
+      if(s==='거래점명'||s==='은행'||s==='지점')          ci.bank   = i;
+    });
+
+    // 구 신한 양식 fallback: 컬럼 인덱스가 없으면 위치로 대입
+    // 구 신한: [0]=날짜, [3]=출금, [4]=입금, [5]=내용, [6]=잔액
+    if(ci.date===undefined) ci.date = 0;
+    if(ci.out===undefined)  ci.out  = 3;
+    if(ci.inp===undefined)  ci.inp  = 4;
+    if(ci.bal===undefined)  ci.bal  = (ci.desc!==undefined ? 7 : 6);
+
+    // 날짜 정규화: YYYY.MM.DD HH:MM:SS → YYYY-MM-DD
+    function normBankDate(s) {
+      s = String(s||'').trim();
+      // YYYY.MM.DD HH:MM:SS or YYYY.MM.DD
+      s = s.replace(/^(\d{4})\.(\d{2})\.(\d{2}).*/, '$1-$2-$3');
+      // YYYY-MM-DD 이미 정상
+      return s;
+    }
+
+    // 은행명 결정
+    const bankName = (() => {
+      if(bankAccs.length) return bankAccs[0].bank + ' ' + bankAccs[0].number.slice(-4);
+      return '신한은행 8902';
+    })();
+
     bankPvw=[];
     for(let i=hdr+1;i<rows.length;i++){
-      const rw=rows[i]; if(!String(rw[0]||'').match(/\d{4}-\d{2}-\d{2}/)) continue;
-      const out=parseFloat(String(rw[3]||'0').replace(/,/g,''))||0;
-      const inp=parseFloat(String(rw[4]||'0').replace(/,/g,''))||0;
-      const bal=parseFloat(String(rw[6]||'0').replace(/,/g,''))||0;
-      const desc=[rw[2],rw[5]].filter(Boolean).join(' ').trim();
-      bankPvw.push({date:rw[0],type:inp>0?'income':'expense',amount:inp>0?inp:out,balance:bal,desc,acct:autoClassify(desc),bank:'신한은행 8902',note:''});
+      const rw = rows[i];
+      const rawDate = String(rw[ci.date]||'').trim();
+      if(!rawDate || !rawDate.match(/\d{4}/)) continue; // 날짜 없으면 건너뜀
+
+      const date = normBankDate(rawDate);
+      if(!date.match(/^\d{4}-\d{2}-\d{2}$/)) continue;
+
+      const inp = parseFloat(String(rw[ci.inp]||'0').replace(/[,\s]/g,''))||0;
+      const out = parseFloat(String(rw[ci.out]||'0').replace(/[,\s]/g,''))||0;
+      const bal = parseFloat(String(rw[ci.bal]||'0').replace(/[,\s]/g,''))||0;
+
+      if(!inp && !out) continue; // 금액 없는 행 건너뜀
+
+      // 내용 조합: 적요 + 내용(상세)
+      const parts = [
+        ci.memo!==undefined ? rw[ci.memo] : '',
+        ci.desc!==undefined ? rw[ci.desc] : (rw[5]||''),
+      ].map(v=>String(v||'').trim()).filter(Boolean);
+      const desc = parts.join(' ').trim();
+
+      bankPvw.push({
+        date,
+        type: inp>0 ? 'income' : 'expense',
+        amount: inp>0 ? inp : out,
+        balance: bal,
+        desc,
+        acct: autoClassify(desc),
+        bank: bankName,
+        note: '',
+      });
     }
+
     if(!bankPvw.length){ showErr('bank','파싱된 거래내역이 없습니다.'); return; }
     document.getElementById('bank-err').style.display='none';
 
@@ -2835,29 +2961,16 @@ function dlBlob(content,type,name) {
 }
 /* ═══════ 시스템 설정 ═══════ */
 function recalcExpLedgerBalance() {
-  // linkedExpId 있는 항목 전체 재계산 (잔액 0뿐 아니라 잘못된 것 모두)
   const targets = ledger.filter(l => l.linkedExpId);
   if(!targets.length) { toast('재계산할 항목이 없습니다.', 'ok'); return; }
 
-  // 실제 은행 거래 항목만 날짜 내림차순으로 정렬
-  const realEntries = ledger
-    .filter(l => !l.linkedExpId && Number(l.balance) > 0)
-    .sort((a,b) => {
-      const dc = b.date.localeCompare(a.date);
-      return dc !== 0 ? dc : Number(b.id) - Number(a.id);
-    });
-
   let fixed = 0;
   targets.forEach(item => {
-    // 지급일과 같거나 이전 날짜의 가장 최신 실제 은행 잔액
-    const base = realEntries.find(l => l.date <= item.date);
-    if(base) {
-      const newBal = Number(base.balance) - Number(item.amount);
-      if(item.balance !== newBal) {
-        item.balance = newBal;
-        fsSet(COL.ledger, item.id, item);
-        fixed++;
-      }
+    const auto = calcAutoBalance(item.date, item.type, item.amount, item.id);
+    if(auto !== null && item.balance !== auto) {
+      item.balance = auto;
+      fsSet(COL.ledger, item.id, item);
+      fixed++;
     }
   });
 
