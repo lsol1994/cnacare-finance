@@ -1294,69 +1294,98 @@ function syncDropdowns() {
    - 이후 항목은 순서대로 +입금 / -출금 재계산
    - excludeId: 자기 자신 제외 (수정 시)
 */
-function recalcAllBalances(excludeId) {
-  // 시간순 정렬 (날짜 오름차순, 같은 날은 id 오름차순)
-  const sorted = [...ledger]
-    .filter(l => excludeId == null || l.id != excludeId)
-    .sort((a,b) => {
-      const dc = a.date.localeCompare(b.date);
-      return dc !== 0 ? dc : Number(a.id) - Number(b.id);
-    });
+/* ═══════════════════════════════════════
+   잔액 계산
+   각 거래의 잔액 = 직전 거래 잔액 ± 현재 금액
+   anchor = 은행파일 기준의 가장 오래된 잔액 보유 항목
+   anchor 이후: 순방향 누적
+   anchor 이전: 역방향 역산
+═══════════════════════════════════════ */
 
-  // 기준 잔액: 가장 오래된 잔액 보유 항목
-  const anchor = sorted.find(l => Number(l.balance) > 0);
-  if(!anchor) return null; // 기준점 없음
+function sortedByTime(arr) {
+  return [...arr].sort((a,b) => {
+    const dc = a.date.localeCompare(b.date);
+    return dc !== 0 ? dc : Number(a.id) - Number(b.id);
+  });
+}
 
-  // anchor 이전 항목들의 누적 역산으로 anchor 직전 잔액 구하기
-  // (anchor 이후만 재계산하면 됨)
-  const anchorIdx = sorted.indexOf(anchor);
-  let running = Number(anchor.balance);
+function applyBalanceRecalc(forceSaveIds) {
+  if(!ledger.length) return;
 
-  // anchor 다음 항목들 순서대로 누적
-  const result = {}; // id → 계산된 잔액
-  result[anchor.id] = running;
+  const sorted = sortedByTime(ledger);
 
-  for(let i = anchorIdx + 1; i < sorted.length; i++) {
-    const item = sorted[i];
-    running = item.type === 'income'
-      ? running + Number(item.amount)
-      : running - Number(item.amount);
-    result[item.id] = running;
+  // anchor: 은행파일(linkedExpId 없음) 중 잔액 있는 가장 오래된 것
+  // 없으면 잔액 있는 항목 중 가장 오래된 것
+  let anchor = sorted.find(l => !l.linkedExpId && Number(l.balance) > 0);
+  if(!anchor) anchor = sorted.find(l => Number(l.balance) > 0);
+  if(!anchor) {
+    if(forceSaveIds) ledger.filter(l => forceSaveIds.has(String(l.id))).forEach(l => fsSet(COL.ledger, l.id, l));
+    return;
   }
 
-  return result; // { id: balance, ... }
+  const anchorIdx = sorted.indexOf(anchor);
+  const toSave = forceSaveIds ? new Set(forceSaveIds) : new Set();
+
+  // ── anchor 이후: 순방향 ──
+  // 각 항목 잔액 = 바로 직전 항목 잔액 ± 현재 금액
+  let prev = Number(anchor.balance);
+  for(let i = anchorIdx + 1; i < sorted.length; i++) {
+    const s = sorted[i];
+    const newBal = s.type === 'income' ? prev + Number(s.amount) : prev - Number(s.amount);
+    const item = ledger.find(l => l.id == s.id);
+    if(item) {
+      if(Math.round(item.balance) !== Math.round(newBal)) {
+        item.balance = Math.round(newBal);
+        toSave.add(String(item.id));
+      }
+      prev = Math.round(newBal);
+    }
+  }
+
+  // ── anchor 이전: 역방향 ──
+  // anchor의 잔액에서 거슬러 올라가며 각 항목의 잔액 계산
+  // 항목[i]의 잔액 = 항목[i+1]의 잔액에서 항목[i+1]의 금액을 역산
+  // 즉, 항목[i]의 잔액 = 항목[i]의 거래 직후 잔액
+  //   항목[i+1]이 입금이었다면: 항목[i] 잔액 = 항목[i+1] 잔액 - 항목[i+1] 금액
+  //   항목[i+1]이 출금이었다면: 항목[i] 잔액 = 항목[i+1] 잔액 + 항목[i+1] 금액
+  let nextBal = Number(anchor.balance);
+  for(let i = anchorIdx - 1; i >= 0; i--) {
+    const next = sorted[i + 1]; // i 다음 항목 (더 최신)
+    const curBal = next.type === 'income'
+      ? nextBal - Number(next.amount)   // next가 입금 → 현재 잔액 = next잔액 - next입금
+      : nextBal + Number(next.amount);  // next가 출금 → 현재 잔액 = next잔액 + next출금
+    const item = ledger.find(l => l.id == sorted[i].id);
+    if(item) {
+      if(Math.round(item.balance) !== Math.round(curBal)) {
+        item.balance = Math.round(curBal);
+        toSave.add(String(item.id));
+      }
+      nextBal = Math.round(curBal);
+    }
+  }
+
+  ledger.filter(l => toSave.has(String(l.id))).forEach(l => fsSet(COL.ledger, l.id, l));
 }
 
 function calcAutoBalance(targetDate, targetType, targetAmount, excludeId) {
-  // 시간순 정렬에서 targetDate 직전의 누적 잔액을 구하고
-  // 현재 거래를 적용한 값 반환
-  const sorted = [...ledger]
-    .filter(l => l.id != excludeId)
-    .sort((a,b) => {
-      const dc = a.date.localeCompare(b.date);
-      return dc !== 0 ? dc : Number(a.id) - Number(b.id);
-    });
-
-  // 기준점: 가장 오래된 잔액 보유 항목
-  const anchor = sorted.find(l => Number(l.balance) > 0);
+  const sorted = sortedByTime(ledger.filter(l => l.id != excludeId));
+  let anchor = sorted.find(l => !l.linkedExpId && Number(l.balance) > 0);
+  if(!anchor) anchor = sorted.find(l => Number(l.balance) > 0);
   if(!anchor) return null;
 
-  // anchor부터 targetDate 이전까지 누적
-  let running = Number(anchor.balance);
-  const anchorIdx = sorted.indexOf(anchor);
-
-  for(let i = anchorIdx + 1; i < sorted.length; i++) {
-    const item = sorted[i];
-    if(item.date > targetDate) break;
-    running = item.type === 'income'
-      ? running + Number(item.amount)
-      : running - Number(item.amount);
+  let prev = Number(anchor.balance);
+  for(let i = sorted.indexOf(anchor) + 1; i < sorted.length; i++) {
+    const l = sorted[i];
+    if(l.date > targetDate) break;
+    prev = l.type === 'income' ? prev + Number(l.amount) : prev - Number(l.amount);
   }
+  return targetType === 'income' ? prev + Number(targetAmount) : prev - Number(targetAmount);
+}
 
-  // 현재 거래 적용
-  return targetType === 'income'
-    ? running + Number(targetAmount)
-    : running - Number(targetAmount);
+function recalcExpLedgerBalance() {
+  applyBalanceRecalc(null);
+  renderL();
+  toast('전체 잔액 재계산 완료', 'ok');
 }
 
 function openLAdd(id) {
@@ -1452,11 +1481,10 @@ function saveL() {
   closeMo('mo-l-add'); renderL(); updBadges(); updSbDate();
 }
 function delL(id) {
-  // id 타입 불일치 방지 (Firestore는 문자열, onclick은 숫자)
   const item = ledger.find(t=>t.id==id);
   if(!confirm('삭제하시겠습니까?')) return;
 
-  // 지출결의서 연동 항목이면 → 지출결의서 상태 '승인'으로 복원 (재등록 가능)
+  // 지출결의서 연동 항목이면 → 지출결의서 상태 '승인'으로 복원
   if(item && item.linkedExpId) {
     const exp = expReqs.find(x=>x.id==item.linkedExpId);
     if(exp && exp.status==='지급완료') {
@@ -1472,6 +1500,10 @@ function delL(id) {
 
   ledger = ledger.filter(t=>t.id!=id);
   fsDel(COL.ledger, id);
+
+  // 삭제 후 이후 모든 거래 잔액 연쇄 재계산
+  applyBalanceRecalc(null);
+
   renderL(); updBadges();
   if(!item || !item.linkedExpId) toast('삭제되었습니다.');
 }
@@ -1729,59 +1761,27 @@ function parseBankFile(file) {
 }
 function importBank() {
   let add=0, skip=0;
-  const newItems=[];
+  const newIds = new Set();
 
   bankPvw.forEach(r=>{
     if(!r._checked){ skip++; return; }
     const item={id:nxId++,...r};
     delete item._idx; delete item._isExpDup; delete item._isDup; delete item._checked;
-    // 파일의 잔액은 임시 보관 (기준점으로만 사용)
-    ledger.push(item); newItems.push(item); add++;
+    ledger.push(item);
+    newIds.add(String(item.id));
+    add++;
   });
 
   if(!add){ closeMo('mo-bank-up'); toast(`${skip}건 건너뜀`, 'ok'); return; }
 
   ledger.sort((a,b)=>b.date.localeCompare(a.date));
 
-  // ── 전체 잔액 재계산 ──
-  // 1. 모든 항목을 시간순(오름차순) 정렬
-  // 2. 가장 오래된 잔액 보유 항목을 anchor로 삼아 이후 전체 누적재계산
-  // 3. Firestore에 변경된 항목만 저장
-  const sorted = [...ledger].sort((a,b)=>{
-    const dc = a.date.localeCompare(b.date);
-    return dc !== 0 ? dc : Number(a.id) - Number(b.id);
-  });
-  const anchor = sorted.find(l => Number(l.balance) > 0);
-
-  if(anchor) {
-    let running = Number(anchor.balance);
-    const anchorIdx = sorted.indexOf(anchor);
-    const toSave = new Set(newItems.map(i=>String(i.id)));
-
-    for(let i = anchorIdx+1; i < sorted.length; i++) {
-      const item = sorted[i];
-      running = item.type==='income'
-        ? running + Number(item.amount)
-        : running - Number(item.amount);
-
-      const ledgerItem = ledger.find(l=>l.id==item.id);
-      if(ledgerItem && ledgerItem.balance !== running) {
-        ledgerItem.balance = running;
-        toSave.add(String(item.id)); // 잔액 변경된 기존 항목도 저장
-      }
-    }
-
-    // 변경된 항목 Firestore 저장
-    ledger.filter(l=>toSave.has(String(l.id))).forEach(item=>fsSet(COL.ledger,item.id,item));
-  } else {
-    // anchor 없으면 새 항목만 저장
-    newItems.forEach(item=>fsSet(COL.ledger,item.id,item));
-  }
+  // 전체 잔액 재계산 (새 항목 포함, 직전 누적 방식)
+  applyBalanceRecalc(newIds);
 
   closeMo('mo-bank-up'); renderL(); updBadges(); updSbDate();
   let msg = `${add}건 추가됨`;
   if(skip) msg += ` · ${skip}건 건너뜀`;
-  if(anchor) msg += ' · 잔액 자동재계산 완료';
   toast(msg, 'ok');
 }
 function expL(fmt2) {
@@ -3062,42 +3062,6 @@ function dlBlob(content,type,name) {
   setTimeout(()=>URL.revokeObjectURL(a.href),1000);
 }
 /* ═══════ 시스템 설정 ═══════ */
-/* ── 전체 잔액 재계산 + Firestore 저장 (공통) ── */
-function applyBalanceRecalc(targetIds) {
-  const sorted = [...ledger].sort((a,b)=>{
-    const dc = a.date.localeCompare(b.date);
-    return dc !== 0 ? dc : Number(a.id) - Number(b.id);
-  });
-  const anchor = sorted.find(l => Number(l.balance) > 0);
-  if(!anchor) {
-    if(targetIds) ledger.filter(l=>targetIds.has(String(l.id))).forEach(l=>fsSet(COL.ledger,l.id,l));
-    return;
-  }
-  let running = Number(anchor.balance);
-  const anchorIdx = sorted.indexOf(anchor);
-  const toSave = targetIds ? new Set(targetIds) : new Set();
-
-  for(let i = anchorIdx+1; i < sorted.length; i++) {
-    const s = sorted[i];
-    running = s.type==='income'
-      ? running + Number(s.amount)
-      : running - Number(s.amount);
-    const item = ledger.find(l=>l.id==s.id);
-    if(item && Math.round(item.balance) !== Math.round(running)) {
-      item.balance = Math.round(running);
-      toSave.add(String(item.id));
-    }
-  }
-  ledger.filter(l=>toSave.has(String(l.id))).forEach(l=>fsSet(COL.ledger,l.id,l));
-}
-
-function recalcExpLedgerBalance() {
-  // 전체 잔액 재계산 (지출결의 항목 포함 모두)
-  applyBalanceRecalc(null);
-  renderL();
-  toast('전체 잔액 재계산 완료', 'ok');
-}
-
 function saveSysInfo() {
   const get = id => (document.getElementById(id)||{}).value || '';
   const sysInfo = {
