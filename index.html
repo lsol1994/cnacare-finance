@@ -646,6 +646,7 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
     <div style="padding:14px 16px">
       <div style="font-size:12.5px;color:var(--t2);margin-bottom:10px">지출결의서에서 자동 생성된 입출금 내역의 잔액이 0으로 표시되는 경우, 아래 버튼으로 일괄 재계산합니다.</div>
       <button class="btn" onclick="recalcExpLedgerBalance()">🔄 지출결의 입출금 잔액 재계산</button>
+      <button class="btn" onclick="removeDupLedger()" style="margin-left:8px">🗑 중복 입출금 내역 제거</button>
     </div>
   </div>
 </div>
@@ -1302,6 +1303,17 @@ function syncDropdowns() {
    anchor 이전: 역방향 역산
 ═══════════════════════════════════════ */
 
+/* ═══════════════════════════════════════════════════
+   잔액 계산 - 순수 누적 가감 방식 (최종)
+
+   규칙:
+   1. 날짜 오름차순(과거→현재)으로 정렬
+   2. 가장 오래된 잔액 보유 항목 = anchor (변하지 않음)
+   3. anchor 이후: 직전잔액 + 입금액 - 출금액 = 현재잔액
+   4. anchor 이전: 역산 (현재잔액에서 거슬러 올라감)
+   5. linkedExpId 등 예외 처리 없음 - 모든 항목 동일 적용
+═══════════════════════════════════════════════════ */
+
 function sortedByTime(arr) {
   return [...arr].sort((a,b) => {
     const dc = a.date.localeCompare(b.date);
@@ -1309,84 +1321,95 @@ function sortedByTime(arr) {
   });
 }
 
+/* 핵심 재계산 함수
+   - 날짜 오름차순 정렬 후 순수 누적 가감
+   - anchor(잔액 있는 가장 오래된 항목) 기준
+   - anchor 이전: 역산
+   - anchor 이후: 순산
+   - 변경된 항목만 Firestore 저장
+*/
 function applyBalanceRecalc(forceSaveIds) {
   if(!ledger.length) return;
 
-  const sorted = sortedByTime(ledger);
+  // 1. 날짜 오름차순 정렬 (과거 → 현재)
+  const asc = sortedByTime(ledger);
 
-  // anchor: 은행파일(linkedExpId 없음) 중 잔액 있는 가장 오래된 것
-  // 없으면 잔액 있는 항목 중 가장 오래된 것
-  let anchor = sorted.find(l => !l.linkedExpId && Number(l.balance) > 0);
-  if(!anchor) anchor = sorted.find(l => Number(l.balance) > 0);
-  if(!anchor) {
+  // 2. anchor: 잔액이 있는 가장 오래된 항목
+  const anchorIdx = asc.findIndex(l => Number(l.balance) > 0);
+  if(anchorIdx < 0) {
+    // anchor 없으면 forceSaveIds만 저장
     if(forceSaveIds) ledger.filter(l => forceSaveIds.has(String(l.id))).forEach(l => fsSet(COL.ledger, l.id, l));
     return;
   }
-
-  const anchorIdx = sorted.indexOf(anchor);
+  const anchorBal = Number(asc[anchorIdx].balance);
   const toSave = forceSaveIds ? new Set(forceSaveIds) : new Set();
 
-  // ── anchor 이후: 순방향 ──
-  // 각 항목 잔액 = 바로 직전 항목 잔액 ± 현재 금액
-  let prev = Number(anchor.balance);
-  for(let i = anchorIdx + 1; i < sorted.length; i++) {
-    const s = sorted[i];
-    const newBal = s.type === 'income' ? prev + Number(s.amount) : prev - Number(s.amount);
+  // 3. anchor 이후: 순방향 누적
+  //    현재잔액 = 직전잔액 + 입금 - 출금
+  let running = anchorBal;
+  for(let i = anchorIdx + 1; i < asc.length; i++) {
+    const s = asc[i];
+    running = s.type === 'income'
+      ? running + Number(s.amount)
+      : running - Number(s.amount);
     const item = ledger.find(l => l.id == s.id);
-    if(item) {
-      if(Math.round(item.balance) !== Math.round(newBal)) {
-        item.balance = Math.round(newBal);
-        toSave.add(String(item.id));
-      }
-      prev = Math.round(newBal);
+    if(item && Math.round(item.balance) !== Math.round(running)) {
+      item.balance = Math.round(running);
+      toSave.add(String(item.id));
     }
   }
 
-  // ── anchor 이전: 역방향 ──
-  // anchor의 잔액에서 거슬러 올라가며 각 항목의 잔액 계산
-  // 항목[i]의 잔액 = 항목[i+1]의 잔액에서 항목[i+1]의 금액을 역산
-  // 즉, 항목[i]의 잔액 = 항목[i]의 거래 직후 잔액
-  //   항목[i+1]이 입금이었다면: 항목[i] 잔액 = 항목[i+1] 잔액 - 항목[i+1] 금액
-  //   항목[i+1]이 출금이었다면: 항목[i] 잔액 = 항목[i+1] 잔액 + 항목[i+1] 금액
-  let nextBal = Number(anchor.balance);
+  // 4. anchor 이전: 역방향 역산
+  //    항목[i]의 잔액 = 항목[i+1]의 잔액에서 항목[i+1] 거래를 역으로 제거
+  //    항목[i+1]이 입금: 항목[i]잔액 = 항목[i+1]잔액 - 항목[i+1]금액
+  //    항목[i+1]이 출금: 항목[i]잔액 = 항목[i+1]잔액 + 항목[i+1]금액
+  let nextBal = anchorBal;
+  let nextItem = asc[anchorIdx];
   for(let i = anchorIdx - 1; i >= 0; i--) {
-    const next = sorted[i + 1]; // i 다음 항목 (더 최신)
-    const curBal = next.type === 'income'
-      ? nextBal - Number(next.amount)   // next가 입금 → 현재 잔액 = next잔액 - next입금
-      : nextBal + Number(next.amount);  // next가 출금 → 현재 잔액 = next잔액 + next출금
-    const item = ledger.find(l => l.id == sorted[i].id);
-    if(item) {
-      if(Math.round(item.balance) !== Math.round(curBal)) {
-        item.balance = Math.round(curBal);
-        toSave.add(String(item.id));
-      }
-      nextBal = Math.round(curBal);
+    const curBal = nextItem.type === 'income'
+      ? nextBal - Number(nextItem.amount)
+      : nextBal + Number(nextItem.amount);
+    const item = ledger.find(l => l.id == asc[i].id);
+    if(item && Math.round(item.balance) !== Math.round(curBal)) {
+      item.balance = Math.round(curBal);
+      toSave.add(String(item.id));
     }
+    nextBal = Math.round(curBal);
+    nextItem = asc[i];
   }
 
+  // 5. 변경된 항목 Firestore 저장
   ledger.filter(l => toSave.has(String(l.id))).forEach(l => fsSet(COL.ledger, l.id, l));
 }
 
+/* 모달 자동입력용
+   특정 거래 위치에서의 잔액 계산
+*/
 function calcAutoBalance(targetDate, targetType, targetAmount, excludeId) {
-  const sorted = sortedByTime(ledger.filter(l => l.id != excludeId));
-  let anchor = sorted.find(l => !l.linkedExpId && Number(l.balance) > 0);
-  if(!anchor) anchor = sorted.find(l => Number(l.balance) > 0);
-  if(!anchor) return null;
+  const asc = sortedByTime(ledger.filter(l => l.id != excludeId));
+  const anchorIdx = asc.findIndex(l => Number(l.balance) > 0);
+  if(anchorIdx < 0) return null;
 
-  let prev = Number(anchor.balance);
-  for(let i = sorted.indexOf(anchor) + 1; i < sorted.length; i++) {
-    const l = sorted[i];
-    if(l.date > targetDate) break;
-    prev = l.type === 'income' ? prev + Number(l.amount) : prev - Number(l.amount);
+  // anchor부터 targetDate까지 누적
+  let running = Number(asc[anchorIdx].balance);
+  for(let i = anchorIdx + 1; i < asc.length; i++) {
+    if(asc[i].date > targetDate) break;
+    running = asc[i].type === 'income'
+      ? running + Number(asc[i].amount)
+      : running - Number(asc[i].amount);
   }
-  return targetType === 'income' ? prev + Number(targetAmount) : prev - Number(targetAmount);
+  return targetType === 'income'
+    ? running + Number(targetAmount)
+    : running - Number(targetAmount);
 }
 
+/* 시스템 설정 버튼 - 전체 일괄 재계산 */
 function recalcExpLedgerBalance() {
   applyBalanceRecalc(null);
   renderL();
   toast('전체 잔액 재계산 완료', 'ok');
 }
+
 
 function openLAdd(id) {
   editLId=id||null;
@@ -2666,27 +2689,12 @@ function changeExpStatus(id, status) {
           ? t.bank + (t.account ? ' ' + t.account.slice(-4) : '')
           : (bankAccs[0] ? bankAccs[0].bank + ' ' + bankAccs[0].number.slice(-4) : '');
 
-        // 잔액 계산: 지급일 기준 직전 실제 거래의 잔액 - 출금액
-        // ledger는 날짜 내림차순 정렬 상태
-        // 실제 잔액 = 은행파일 가져오기 항목(linkedExpId 없음)만 신뢰
-        const sorted = [...ledger].sort((a,b) => {
-          const dc = b.date.localeCompare(a.date);
-          return dc !== 0 ? dc : Number(b.id) - Number(a.id);
-        });
-        // 지급일과 같거나 이전 날짜의 실제 은행 거래 중 가장 최신 잔액
-        const baseEntry = sorted.find(l =>
-          !l.linkedExpId &&
-          Number(l.balance) > 0 &&
-          l.date <= t.payDate
-        );
-        const calcBalance = baseEntry ? Number(baseEntry.balance) - Number(t.amount) : 0;
-
         const newLedger = {
           id: nxId++,
           date: t.payDate,
           type: 'expense',
           amount: t.amount,
-          balance: calcBalance,
+          balance: 0,  // applyBalanceRecalc이 계산
           desc: `[지출결의] ${t.title} - ${t.payee}`,
           acct: t.acct || autoClassify(t.title),
           bank: bankName,
@@ -2695,6 +2703,8 @@ function changeExpStatus(id, status) {
         };
         ledger.unshift(newLedger);
         ledger.sort((a,b) => b.date.localeCompare(a.date));
+        // 전체 잔액 재계산 (새 항목 포함)
+        applyBalanceRecalc(new Set([String(newLedger.id)]));
         fsSet(COL.ledger, newLedger.id, newLedger);
         renderL();
         toast('지급완료 처리 → 입출금 내역에 출금 자동 추가됨', 'ok');
@@ -3062,6 +3072,60 @@ function dlBlob(content,type,name) {
   setTimeout(()=>URL.revokeObjectURL(a.href),1000);
 }
 /* ═══════ 시스템 설정 ═══════ */
+
+/* 중복 입출금 내역 제거
+   같은 날짜+구분+금액 항목이 2개 이상이면
+   '타행인터넷뱅킹' 또는 더 나중에 등록된 항목만 남기고 제거
+*/
+function removeDupLedger() {
+  const asc = sortedByTime(ledger);
+  const seen = new Map(); // key: date+type+amount → 첫 번째 id
+  const toRemove = [];
+
+  asc.forEach(l => {
+    const key = `${l.date}|${l.type}|${l.amount}`;
+    if(!seen.has(key)) {
+      seen.set(key, l.id);
+    } else {
+      // 중복: 둘 중 어느 걸 제거할지 결정
+      const prevId = seen.get(key);
+      const prev = ledger.find(x => x.id == prevId);
+      const cur = l;
+      // '타행IB'보다 '타행인터넷뱅킹' 우선 유지
+      // 지출결의서 항목은 절대 제거하지 않음
+      if(cur.linkedExpId) {
+        // 현재(cur)가 지출결의 → prev 제거
+        toRemove.push(prevId);
+        seen.set(key, cur.id);
+      } else if(prev && prev.linkedExpId) {
+        // 이전(prev)가 지출결의 → cur 제거
+        toRemove.push(cur.id);
+      } else if(prev && prev.desc && prev.desc.includes('타행IB') && cur.desc && cur.desc.includes('타행인터넷뱅킹')) {
+        // prev=타행IB, cur=타행인터넷뱅킹 → prev 제거
+        toRemove.push(prevId);
+        seen.set(key, cur.id);
+      } else {
+        // 기본: 나중에 등록된 것(cur) 제거
+        toRemove.push(cur.id);
+      }
+    }
+  });
+
+  if(!toRemove.length) { toast('중복 내역이 없습니다.', 'ok'); return; }
+
+  if(!confirm(`중복 내역 ${toRemove.length}건을 제거하시겠습니까?\n(타행IB 계열 항목이 타행인터넷뱅킹과 중복될 경우 타행IB를 제거합니다)`)) return;
+
+  toRemove.forEach(id => {
+    fsDel(COL.ledger, id);
+  });
+  ledger = ledger.filter(l => !toRemove.includes(l.id) && !toRemove.map(String).includes(String(l.id)));
+
+  // 제거 후 전체 잔액 재계산
+  applyBalanceRecalc(null);
+  renderL(); updBadges();
+  toast(`${toRemove.length}건 중복 제거 완료. 잔액 재계산되었습니다.`, 'ok');
+}
+
 function saveSysInfo() {
   const get = id => (document.getElementById(id)||{}).value || '';
   const sysInfo = {
