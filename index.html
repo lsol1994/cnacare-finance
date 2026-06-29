@@ -714,7 +714,7 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
       <div class="fg"><label class="fl">거래일자 *</label><input type="date" class="fc" id="lf-date"></div>
       <div class="fg"><label class="fl">구분 *</label><select class="fc" id="lf-iotype"><option value="income">입금</option><option value="expense">출금</option></select></div>
       <div class="fg"><label class="fl">금액(원) *</label><input type="number" class="fc" id="lf-amount"></div>
-      <div class="fg"><label class="fl">잔액(원)</label><input type="number" class="fc" id="lf-balance"></div>
+      <div class="fg" id="lf-balance-wrap"><label class="fl" id="lf-balance-label">잔액(원)</label><input type="number" class="fc" id="lf-balance" placeholder="잔액 입력"><div class="fh" id="lf-balance-hint" style="display:none;color:var(--O)">⚠ 지출결의서 자동등록 건입니다. 실제 잔액을 입력해주세요.</div></div>
       <div class="fg full"><label class="fl">내용/적요 *</label><input type="text" class="fc" id="lf-desc" placeholder="거래 내용"></div>
       <div class="fg"><label class="fl">계정과목</label><select class="fc" id="lf-acct"></select></div>
       <div class="fg"><label class="fl">은행계좌</label><select class="fc" id="lf-bank"></select></div>
@@ -1290,17 +1290,39 @@ function syncDropdowns() {
 /* ═══════ LEDGER ═══════ */
 function openLAdd(id) {
   editLId=id||null;
-  const t = id ? ledger.find(x=>x.id===id) : null;
+  const t = id ? ledger.find(x=>x.id==id) : null;
   document.getElementById('ml-title').textContent = id ? '거래 수정' : '거래 추가';
   document.getElementById('lf-date').value    = t ? t.date   : new Date().toISOString().slice(0,10);
   document.getElementById('lf-iotype').value  = t ? t.type   : 'income';
   document.getElementById('lf-amount').value  = t ? t.amount : '';
-  document.getElementById('lf-balance').value = t ? t.balance: '';
+  document.getElementById('lf-balance').value = t ? (t.balance || '') : '';
   document.getElementById('lf-desc').value    = t ? t.desc   : '';
   document.getElementById('lf-note').value    = t ? t.note   : '';
   syncDropdowns();
   document.getElementById('lf-acct').value = t ? t.acct : '';
   document.getElementById('lf-bank').value = t ? t.bank : '';
+
+  // 지출결의서 자동생성 항목이면 잔액 칸 강조
+  const isExpLinked = t && t.linkedExpId;
+  const hint  = document.getElementById('lf-balance-hint');
+  const label = document.getElementById('lf-balance-label');
+  const balEl = document.getElementById('lf-balance');
+  if(isExpLinked) {
+    hint.style.display = '';
+    label.textContent  = '잔액(원) *';
+    label.style.color  = 'var(--O)';
+    balEl.style.borderColor = 'var(--O)';
+    balEl.style.boxShadow   = '0 0 0 2px rgba(194,65,12,.12)';
+    // 모달 열린 후 잔액 칸 자동 포커스
+    setTimeout(() => balEl.focus(), 200);
+  } else {
+    hint.style.display = 'none';
+    label.textContent  = '잔액(원)';
+    label.style.color  = '';
+    balEl.style.borderColor = '';
+    balEl.style.boxShadow   = '';
+  }
+
   openMo('mo-l-add');
 }
 function saveL() {
@@ -1374,24 +1396,34 @@ function renderL() {
   em.style.display='none'; renderLStats(rows);
   tb.innerHTML=rows.map(t=>{
     const cc=acctColor(t.acct);
-    return `<tr>
+    const needsBal = t.linkedExpId && !Number(t.balance);
+    const balCell = needsBal
+      ? `<td><button class="btn sm" style="color:var(--O);border-color:var(--O);background:var(--OL);font-size:11px;padding:3px 8px" onclick="openLAdd(${t.id})">잔액 입력 ✏</button></td>`
+      : `<td class="nm bal">${fmt(t.balance)}</td>`;
+    return `<tr style="${needsBal?'background:#FFF7ED':''}">
       <td class="dn">${t.date}</td>
       <td><span class="badge ${t.type==='income'?'bi':'be'}">${t.type==='income'?'입금':'출금'}</span></td>
       <td><div style="max-width:200px;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.desc}</div>${t.note?`<div style="font-size:11px;color:var(--tm);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.note}</div>`:''}</td>
       <td class="nm exp">${t.type==='expense'?fmt(t.amount):''}</td>
       <td class="nm inc">${t.type==='income'?fmt(t.amount):''}</td>
-      <td class="nm bal">${fmt(t.balance)}</td>
+      ${balCell}
       <td><span class="at ${cc}" onclick="openLAcct(${t.id})">${t.acct||'미분류'} ✏</span></td>
       <td style="font-size:11px;color:var(--tm)">${t.bank}</td>
       <td><button class="btn sm ic" onclick="openLAdd(${t.id})">✏</button> <button class="btn sm ic d" onclick="delL(${t.id})">🗑</button></td>
     </tr>`;
   }).join('');
-  ca.innerHTML=rows.map(t=>`<div class="txc">
+  ca.innerHTML=rows.map(t=>{
+    const needsBal = t.linkedExpId && !Number(t.balance);
+    return `<div class="txc" style="${needsBal?'border-left:3px solid var(--O);background:#FFF7ED':''}">
     <div class="txc-tp"><div class="txc-d">${t.desc}</div><div class="txc-a ${t.type==='income'?'inc':'exp'}">${t.type==='income'?'+':'-'}${fmtS(t.amount)}</div></div>
     <div class="txc-bt"><span class="txc-dt">${t.date}</span><span class="badge ${t.type==='income'?'bi':'be'}">${t.type==='income'?'입금':'출금'}</span>
+      ${needsBal
+        ? `<button class="btn sm" style="color:var(--O);border-color:var(--O);background:var(--OL);font-size:11px;padding:2px 7px" onclick="openLAdd(${t.id})">잔액 입력 ✏</button>`
+        : `<span style="font-size:11px;color:var(--tm)">잔액 ${fmt(t.balance)}</span>`}
       <span class="at ${acctColor(t.acct)}" onclick="openLAcct(${t.id})">${t.acct||'미분류'} ✏</span>
       <div class="txc-ac"><button class="btn sm ic" onclick="openLAdd(${t.id})">✏</button><button class="btn sm ic d" onclick="delL(${t.id})">🗑</button></div>
-    </div></div>`).join('');
+    </div></div>`;
+  }).join('');
 }
 function renderLStats(rows) {
   const inc=rows.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0);
