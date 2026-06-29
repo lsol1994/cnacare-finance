@@ -1315,9 +1315,21 @@ function syncDropdowns() {
 ═══════════════════════════════════════════════════ */
 
 function sortedByTime(arr) {
-  return [...arr].sort((a,b) => {
+  // 날짜 오름차순 (과거→현재)
+  // 같은 날짜: ledger 배열 인덱스 역순
+  //   → ledger는 화면 내림차순(최신→과거) 정렬이므로
+  //   → 인덱스가 클수록 = 화면 아래 = 더 오래된 데이터 = 먼저 계산
+  //   → 즉 인덱스 내림차순 = 과거→현재 순서와 동일
+  const ledgerIndexMap = new Map();
+  ledger.forEach((l, i) => ledgerIndexMap.set(String(l.id), i));
+
+  return [...arr].sort((a, b) => {
     const dc = a.date.localeCompare(b.date);
-    return dc !== 0 ? dc : Number(a.id) - Number(b.id);
+    if(dc !== 0) return dc; // 날짜 다르면 날짜 순
+    // 같은 날짜: ledger 인덱스 내림차순 (인덱스 큰 것 = 화면 아래 = 오래된 것 = 먼저)
+    const ia = ledgerIndexMap.get(String(a.id)) ?? 0;
+    const ib = ledgerIndexMap.get(String(b.id)) ?? 0;
+    return ib - ia;
   });
 }
 
@@ -1379,6 +1391,7 @@ function applyBalanceRecalc(forceSaveIds) {
   }
 
   // 5. 변경된 항목 Firestore 저장
+  // forceSaveIds가 있으면 그것도 포함, 없으면 변경분만 저장
   ledger.filter(l => toSave.has(String(l.id))).forEach(l => fsSet(COL.ledger, l.id, l));
 }
 
@@ -1494,12 +1507,27 @@ function saveL() {
     desc, acct:document.getElementById('lf-acct').value||autoClassify(desc),
     bank:document.getElementById('lf-bank').value,
     note:document.getElementById('lf-note').value};
-  if(editLId){ const i=ledger.findIndex(t=>t.id===editLId); if(i>=0){ledger[i]={...ledger[i],...obj};} toast('수정되었습니다.','ok'); }
-  else { const newItem={id:nxId++,...obj}; ledger.unshift(newItem); toast('추가되었습니다.','ok'); }
+
+  const changedIds = new Set();
+
+  if(editLId){
+    // id 타입 불일치 방지: == 사용
+    const i=ledger.findIndex(t=>t.id==editLId);
+    if(i>=0){
+      ledger[i]={...ledger[i],...obj};
+      changedIds.add(String(ledger[i].id));
+    }
+    toast('수정되었습니다.','ok');
+  } else {
+    const newItem={id:nxId++,...obj};
+    ledger.unshift(newItem);
+    changedIds.add(String(newItem.id));
+    toast('추가되었습니다.','ok');
+  }
   ledger.sort((a,b)=>b.date.localeCompare(a.date));
 
-  // 저장 후 전체 잔액 재계산하여 Firestore에 반영
-  applyBalanceRecalc();
+  // 전체 잔액 재계산 + Firestore 저장
+  applyBalanceRecalc(changedIds);
 
   closeMo('mo-l-add'); renderL(); updBadges(); updSbDate();
 }
@@ -1539,7 +1567,7 @@ function openLAcct(id) {
   openMo('mo-l-acct');
 }
 function applyLAcct() {
-  const t=ledger.find(x=>x.id===editLAId);
+  const t=ledger.find(x=>x.id==editLAId);
   if(t){ t.acct=document.getElementById('la-sel').value; fsSet(COL.ledger,t.id,t); }
   closeMo('mo-l-acct'); renderL(); toast('계정과목이 변경되었습니다.','ok');
 }
