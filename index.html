@@ -1004,14 +1004,45 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
       <div class="fg full"><label class="fl">제목 *</label><input type="text" class="fc" id="ef-title" placeholder="예: 5월 임차료 지급"></div>
       <div class="fg"><label class="fl">수취인 *</label><input type="text" class="fc" id="ef-payee" placeholder="상호 또는 이름"></div>
       <div class="fg"><label class="fl">사업자번호</label><input type="text" class="fc" id="ef-bizno" placeholder="000-00-00000"></div>
-      <div class="fg"><label class="fl">계정과목</label><select class="fc" id="ef-acct"></select></div>
-      <div class="fg"><label class="fl">지급금액(원) *</label><input type="number" class="fc" id="ef-amount" placeholder="0"></div>
+      <div class="fg"><label class="fl">계정과목</label><select class="fc" id="ef-acct" onchange="onExpAcctChange()"></select></div>
+      <div class="fg"><label class="fl">지급금액(원) *</label><input type="number" class="fc" id="ef-amount" placeholder="0" oninput="calcExpectedRev()"></div>
       <div class="fg"><label class="fl">지급방법</label><select class="fc" id="ef-method"><option>계좌이체</option><option>현금</option><option>카드</option><option>수표</option></select></div>
       <div class="fg"><label class="fl">은행명</label><input type="text" class="fc" id="ef-bank" placeholder="신한은행"></div>
       <div class="fg"><label class="fl">계좌번호</label><input type="text" class="fc" id="ef-account" placeholder="000-000-000000"></div>
       <div class="fg full"><label class="fl">지출 내용 *</label><textarea class="fc" id="ef-desc" rows="3" placeholder="지출 내용을 구체적으로 입력하세요" style="resize:vertical"></textarea></div>
       <div class="fg"><label class="fl">상태</label><select class="fc" id="ef-status"><option value="대기">대기</option><option value="승인">승인</option><option value="지급완료">지급완료</option><option value="반려">반려</option></select></div>
       <div class="fg full"><label class="fl">비고</label><input type="text" class="fc" id="ef-note" placeholder="추가 메모"></div>
+
+      <!-- 급여 계정 시 외상매출금 입력 섹션 -->
+      <div id="ef-rev-section" class="fg full" style="display:none;grid-column:1/-1;background:var(--PU);border:1px solid var(--P);border-radius:var(--r2);padding:12px 14px;margin-top:4px">
+        <div style="font-size:12.5px;font-weight:700;color:var(--P);margin-bottom:10px">
+          💡 급여 지급 → 외상매출금 (미수금) 자동 계산
+          <span style="font-size:11px;font-weight:400;color:var(--t3);margin-left:6px">= 지급금액 + 수수료 (간병일수 × 5,000원)</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+          <div>
+            <label class="fl">간병 일수</label>
+            <input type="number" class="fc" id="ef-care-days" placeholder="예: 30" oninput="calcExpectedRev()" min="0">
+            <div class="fh">일당 수수료 5,000원 × 간병일수</div>
+          </div>
+          <div>
+            <label class="fl">수수료 합계</label>
+            <input type="number" class="fc" id="ef-fee-total" placeholder="자동계산" readonly
+              style="background:var(--sf2);color:var(--t3)">
+            <div class="fh">간병일수 × 5,000원</div>
+          </div>
+          <div>
+            <label class="fl" style="color:var(--P);font-weight:700">예상매출액 (외상매출금) *</label>
+            <input type="number" class="fc" id="ef-expected-rev" placeholder="직접 입력 또는 자동계산"
+              style="border-color:var(--P);font-weight:600">
+            <div class="fh">지급금액 + 수수료 = 업체 청구 금액</div>
+          </div>
+        </div>
+        <div style="margin-top:10px;font-size:11.5px;color:var(--t2)">
+          <label class="fl">수취인/업체명</label>
+          <input type="text" class="fc" id="ef-client" placeholder="업체명 (외상매출 청구처)">
+        </div>
+      </div>
     </div>
     <div class="mft"><button class="btn" onclick="closeMo('mo-exp-add')">취소</button><button class="btn p" onclick="saveExp()">✓ 저장</button></div>
   </div>
@@ -2746,6 +2777,47 @@ function renderDbPanels() {
 let editExpId = null;
 const expStatusClass = {대기:'est-wait',승인:'est-ok',지급완료:'est-paid',반려:'est-rej'};
  
+/* 급여 계정 선택 시 외상매출금 섹션 토글 */
+function onExpAcctChange() {
+  const acct = document.getElementById('ef-acct').value;
+  const sec  = document.getElementById('ef-rev-section');
+  if(acct === '급여') {
+    sec.style.display = '';
+    calcExpectedRev();
+  } else {
+    sec.style.display = 'none';
+  }
+}
+
+/* 외상매출금 자동계산: 지급금액 + (간병일수 × 5,000) */
+function calcExpectedRev() {
+  const amount   = parseFloat(document.getElementById('ef-amount')?.value)||0;
+  const days     = parseFloat(document.getElementById('ef-care-days')?.value)||0;
+  const fee      = days * 5000;
+  const expected = amount + fee;
+  const feeEl    = document.getElementById('ef-fee-total');
+  const revEl    = document.getElementById('ef-expected-rev');
+  if(feeEl) feeEl.value = fee || '';
+  // 예상매출액은 자동계산값으로 채우되, 사용자가 직접 수정 가능
+  if(revEl && !revEl._manualEdit) revEl.value = expected || '';
+}
+
+/* 예상매출액 직접 수정 감지 */
+document.addEventListener('DOMContentLoaded', () => {
+  const revEl = document.getElementById('ef-expected-rev');
+  if(revEl) {
+    revEl.addEventListener('input', () => { revEl._manualEdit = true; });
+    // 간병일수 바뀌면 수동편집 플래그 초기화
+    document.getElementById('ef-care-days')?.addEventListener('input', () => {
+      revEl._manualEdit = false;
+      calcExpectedRev();
+    });
+    document.getElementById('ef-amount')?.addEventListener('input', () => {
+      if(!revEl._manualEdit) calcExpectedRev();
+    });
+  }
+});
+
 function openExpAdd(id) {
   editExpId = id||null;
   const t = id ? expReqs.find(x=>x.id==id) : null;
@@ -2753,45 +2825,67 @@ function openExpAdd(id) {
   const today = new Date().toISOString().slice(0,10);
   document.getElementById('ef-draft-date').value = t ? t.draftDate : today;
   document.getElementById('ef-pay-date').value   = t ? t.payDate   : today;
-  document.getElementById('ef-title').value  = t ? t.title  : '';
-  document.getElementById('ef-payee').value  = t ? t.payee  : '';
-  document.getElementById('ef-bizno').value  = t ? t.bizno  : '';
-  document.getElementById('ef-amount').value = t ? t.amount : '';
-  document.getElementById('ef-method').value = t ? t.method : '계좌이체';
-  document.getElementById('ef-bank').value   = t ? t.bank   : '';
-  document.getElementById('ef-account').value= t ? t.account: '';
-  document.getElementById('ef-desc').value   = t ? t.desc   : '';
-  document.getElementById('ef-status').value = t ? t.status : '대기';
-  document.getElementById('ef-note').value   = t ? t.note   : '';
+  document.getElementById('ef-title').value      = t ? t.title  : '';
+  document.getElementById('ef-payee').value      = t ? t.payee  : '';
+  document.getElementById('ef-bizno').value      = t ? t.bizno  : '';
+  document.getElementById('ef-amount').value     = t ? t.amount : '';
+  document.getElementById('ef-method').value     = t ? t.method : '계좌이체';
+  document.getElementById('ef-bank').value       = t ? t.bank   : '';
+  document.getElementById('ef-account').value    = t ? t.account: '';
+  document.getElementById('ef-desc').value       = t ? t.desc   : '';
+  document.getElementById('ef-status').value     = t ? t.status : '대기';
+  document.getElementById('ef-note').value       = t ? t.note   : '';
+  // 외상매출금 필드 복원
+  const revEl = document.getElementById('ef-expected-rev');
+  if(revEl) { revEl.value = t?.expectedRev||''; revEl._manualEdit = !!(t?.expectedRev); }
+  const daysEl = document.getElementById('ef-care-days');
+  if(daysEl) daysEl.value = t?.careDays||'';
+  const feeEl = document.getElementById('ef-fee-total');
+  if(feeEl) feeEl.value = t?.careDays ? t.careDays*5000 : '';
+  const clientEl = document.getElementById('ef-client');
+  if(clientEl) clientEl.value = t?.client||'';
   syncDropdowns();
-  document.getElementById('ef-acct').value   = t ? t.acct   : '';
+  document.getElementById('ef-acct').value = t ? t.acct : '';
+  // 급여 계정이면 섹션 표시
+  const sec = document.getElementById('ef-rev-section');
+  if(sec) sec.style.display = (t?.acct==='급여') ? '' : 'none';
   openMo('mo-exp-add');
 }
 
-/* 지출결의서 복사 - 날짜·상태만 초기화, 나머지 내용 그대로 */
+/* 지출결의서 복사 */
 function openExpCopy(id) {
   const t = expReqs.find(x=>x.id==id);
   if(!t) return;
-  editExpId = null; // 새 건으로 저장
+  editExpId = null;
   const today = new Date().toISOString().slice(0,10);
   document.getElementById('me-title').textContent = '지출결의서 복사 작성';
   document.getElementById('ef-draft-date').value = today;
   document.getElementById('ef-pay-date').value   = today;
-  document.getElementById('ef-title').value  = t.title;
-  document.getElementById('ef-payee').value  = t.payee;
-  document.getElementById('ef-bizno').value  = t.bizno  || '';
-  document.getElementById('ef-amount').value = t.amount;
-  document.getElementById('ef-method').value = t.method || '계좌이체';
-  document.getElementById('ef-bank').value   = t.bank   || '';
-  document.getElementById('ef-account').value= t.account|| '';
-  document.getElementById('ef-desc').value   = t.desc;
-  document.getElementById('ef-status').value = '대기';  // 상태 초기화
-  document.getElementById('ef-note').value   = t.note   || '';
+  document.getElementById('ef-title').value      = t.title;
+  document.getElementById('ef-payee').value      = t.payee;
+  document.getElementById('ef-bizno').value      = t.bizno  || '';
+  document.getElementById('ef-amount').value     = t.amount;
+  document.getElementById('ef-method').value     = t.method || '계좌이체';
+  document.getElementById('ef-bank').value       = t.bank   || '';
+  document.getElementById('ef-account').value    = t.account|| '';
+  document.getElementById('ef-desc').value       = t.desc;
+  document.getElementById('ef-status').value     = '대기';
+  document.getElementById('ef-note').value       = t.note   || '';
+  const revEl = document.getElementById('ef-expected-rev');
+  if(revEl) { revEl.value = t?.expectedRev||''; revEl._manualEdit = !!(t?.expectedRev); }
+  const daysEl = document.getElementById('ef-care-days');
+  if(daysEl) daysEl.value = t?.careDays||'';
+  const feeEl = document.getElementById('ef-fee-total');
+  if(feeEl) feeEl.value = t?.careDays ? t.careDays*5000 : '';
+  const clientEl = document.getElementById('ef-client');
+  if(clientEl) clientEl.value = t?.client||'';
   syncDropdowns();
-  document.getElementById('ef-acct').value   = t.acct   || '';
+  document.getElementById('ef-acct').value = t.acct || '';
+  const sec = document.getElementById('ef-rev-section');
+  if(sec) sec.style.display = (t.acct==='급여') ? '' : 'none';
   openMo('mo-exp-add');
 }
- 
+
 function saveExp() {
   const draftDate = document.getElementById('ef-draft-date').value;
   const payDate   = document.getElementById('ef-pay-date').value;
@@ -2802,16 +2896,24 @@ function saveExp() {
   if(!draftDate||!payDate||!title||!payee||!amount||!desc){
     toast('기안일자·지급일자·제목·수취인·금액·지출내용은 필수입니다.','err'); return;
   }
+  const acct = document.getElementById('ef-acct').value||autoClassify(title+' '+payee);
+  // 급여 계정일 때 외상매출금 저장
+  const isWage     = acct === '급여';
+  const careDays   = isWage ? parseFloat(document.getElementById('ef-care-days')?.value)||0 : 0;
+  const expectedRev= isWage ? parseFloat(document.getElementById('ef-expected-rev')?.value)||0 : 0;
+  const client     = isWage ? (document.getElementById('ef-client')?.value||'') : '';
+
   const obj = {
     draftDate, payDate, title, payee,
-    bizno:   document.getElementById('ef-bizno').value,
-    acct:    document.getElementById('ef-acct').value||autoClassify(title+' '+payee),
-    amount,
-    method:  document.getElementById('ef-method').value,
-    bank:    document.getElementById('ef-bank').value,
-    account: document.getElementById('ef-account').value,
+    bizno:    document.getElementById('ef-bizno').value,
+    acct, amount,
+    method:   document.getElementById('ef-method').value,
+    bank:     document.getElementById('ef-bank').value,
+    account:  document.getElementById('ef-account').value,
     desc, status: document.getElementById('ef-status').value,
-    note:    document.getElementById('ef-note').value,
+    note:     document.getElementById('ef-note').value,
+    // 외상매출금 필드
+    careDays, expectedRev, client,
   };
   if(editExpId){
     const i=expReqs.findIndex(t=>t.id==editExpId);
@@ -2827,6 +2929,7 @@ function saveExp() {
   closeMo('mo-exp-add'); renderExp(); renderExpToday(); updBadges();
   if(document.getElementById('p-dashboard').classList.contains('active')) renderDashboard();
 }
+
  
 function delExp(id) {
   if(!confirm('지출결의서를 삭제하시겠습니까?')) return;
@@ -2936,6 +3039,17 @@ function openExpView(id) {
       <div class="ev-row"><span class="ev-label">계정과목</span><span class="ev-val"><span class="at ${acctColor(t.acct)}">${t.acct||'미분류'}</span></span></div>
       <div class="ev-row"><span class="ev-label">지출내용</span><span class="ev-val" style="white-space:pre-line">${t.desc}</span></div>
       ${t.note?`<div class="ev-row"><span class="ev-label">비고</span><span class="ev-val">${t.note}</span></div>`:''}
+      ${t.acct==='급여' && t.expectedRev ? `
+      <div style="margin-top:10px;padding:10px 12px;background:var(--PU);border:1px solid var(--P);border-radius:var(--r2)">
+        <div style="font-size:12px;font-weight:700;color:var(--P);margin-bottom:6px">💡 외상매출금 (미수금) 내역</div>
+        <div class="ev-row" style="border:none;padding:3px 0"><span class="ev-label" style="width:80px">간병일수</span><span class="ev-val">${t.careDays||'-'}일</span></div>
+        <div class="ev-row" style="border:none;padding:3px 0"><span class="ev-label" style="width:80px">수수료</span><span class="ev-val">${((t.careDays||0)*5000).toLocaleString('ko-KR')}원 (5,000원 × ${t.careDays||0}일)</span></div>
+        <div class="ev-row" style="border:none;padding:3px 0"><span class="ev-label" style="width:80px">업체명</span><span class="ev-val">${t.client||'-'}</span></div>
+        <div class="ev-row" style="border:none;padding:3px 0;border-top:1px solid var(--bd);margin-top:4px">
+          <span class="ev-label" style="width:80px;color:var(--P);font-weight:700">예상매출액</span>
+          <span class="ev-val" style="color:var(--P);font-weight:700;font-size:15px">${Number(t.expectedRev).toLocaleString('ko-KR')}원</span>
+        </div>
+      </div>` : ''}
       ${(t.status==='승인'||t.status==='대기')?(()=>{
         const m=t.method||'계좌이체';
         const isLedger=m==='계좌이체'||m==='현금'||m==='수표';
@@ -3248,14 +3362,25 @@ function getDrillRows(key, start, end) {
       }));
 
   } else if(src === 'expReq') {
-    // 지출결의서 승인 대기 (선급금)
-    expReqs
-      .filter(t => t.status==='승인' && inRange(t.draftDate))
-      .forEach(t => rows.push({
-        date: t.payDate||t.draftDate, acct: t.acct||'',
-        partner: t.payee||'', desc: t.title||'',
-        amount: Number(t.amount||0), note: `${t.method||''} (승인대기)`
-      }));
+    if(acct === 'wage') {
+      // 외상매출금: 급여 계정 중 expectedRev 있는 것
+      expReqs
+        .filter(t => t.acct==='급여' && Number(t.expectedRev||0) > 0)
+        .forEach(t => rows.push({
+          date: t.payDate||t.draftDate, acct: '외상매출금',
+          partner: t.client||t.payee||'', desc: `${t.title} (간병 ${t.careDays||0}일)`,
+          amount: Number(t.expectedRev||0), note: `급여 ${Number(t.amount).toLocaleString()}원 + 수수료 ${((t.careDays||0)*5000).toLocaleString()}원`
+        }));
+    } else {
+      // 선급금: 승인 대기
+      expReqs
+        .filter(t => t.status==='승인' && inRange(t.draftDate))
+        .forEach(t => rows.push({
+          date: t.payDate||t.draftDate, acct: t.acct||'',
+          partner: t.payee||'', desc: t.title||'',
+          amount: Number(t.amount||0), note: `${t.method||''} (승인대기)`
+        }));
+    }
   }
 
   return rows.sort((a,b) => a.date.localeCompare(b.date));
@@ -3488,16 +3613,20 @@ function calcFSData(prefix) {
   const netIncome = opProfit + nonOp;
 
   // ── 재무상태표 ──
-  // 현금·예금: 기간 내 가장 최신 잔액
-  const latestInPeriod = [...ledPeriod]
-    .filter(l => Number(l.balance) > 0)
-    .sort((a,b) => b.date.localeCompare(a.date))[0];
-  const cashBal = latestInPeriod ? Number(latestInPeriod.balance) : 0;
+  // 현금·예금: 기간 내 매출액 + 기타수입 + 이자수익 합계
+  const ASSET_INCOME = [...CAPITAL_ACCTS]; // 출자금은 자본 항목이므로 제외
+  const cashBal = ledPeriod
+    .filter(t => t.type === 'income' && !ASSET_INCOME.includes(t.acct))
+    .reduce((s,t) => s + Number(t.amount||0), 0);
 
-  // 매출채권: 미완료 세금계산서 매출
-  const arAmt = taxInv
+  // 매출채권 = 세금계산서 미완료 매출 + 급여 지출결의서의 외상매출금 합계
+  const arTax = taxInv
     .filter(t => t.ditype==='매출' && t.status!=='완료')
     .reduce((s,t) => s+Number(t.total||0), 0);
+  const arWage = expReqs
+    .filter(t => t.acct==='급여' && Number(t.expectedRev||0) > 0)
+    .reduce((s,t) => s+Number(t.expectedRev||0), 0);
+  const arAmt = arTax + arWage;
 
   // 선급금: 승인 상태 지출결의서
   const prepaid = expReqs
@@ -3531,7 +3660,7 @@ function calcFSData(prefix) {
     // ledIncome 하위 호환 (드릴다운용)
     ledIncome: ledSale,
     // B/S
-    cashBal, arAmt, prepaid, totalAssets,
+    cashBal, arAmt, arTax, arWage, prepaid, totalAssets,
     apAmt, totalLiab,
     paidIn, totalEquity, liabEquity, bsBalance,
   };
@@ -3639,8 +3768,11 @@ function renderBS(d, forPrint=false) {
       <div class="fs-section">
         <div class="fs-section-title">자산 (Assets)</div>
         <table class="fs-tbl"><thead><tr><th>항목</th><th style="width:140px">금액(원) ${forPrint?'':'<span style="font-size:10px;color:#9ca3af;font-weight:400">클릭→상세</span>'}</th></tr></thead><tbody>
-          <tr class="fs-item"><td>현금·예금 (최근 잔액)</td><td>${D('ledger:ALL','입출금 전체',d.cashBal)}</td></tr>
-          <tr class="fs-item"><td>매출채권 (미수금)</td><td>${D('taxSale:ALL','세금계산서 매출(미수)',d.arAmt)}</td></tr>
+          <tr class="fs-item"><td>현금·예금 (매출+기타수입+이자수익)</td><td>${D('ledger_income:ALL','매출액·기타수입·이자수익',d.cashBal)}</td></tr>
+          <tr class="fs-item"><td>현금·예금 (매출+기타수입+이자수익)</td><td>${D('ledger_income:ALL','매출액·기타수입·이자수익',d.cashBal)}</td></tr>
+          ${d.arTax ? `<tr class="fs-item"><td>매출채권 (세금계산서 미수금)</td><td>${D('taxSale:ALL','세금계산서 미완료 매출',d.arTax)}</td></tr>` : ''}
+          ${d.arWage ? `<tr class="fs-item" style="background:var(--PU)"><td>💡 외상매출금 (급여 연동 미수금)</td><td>${fmtFS(d.arWage,'expReq:wage','급여 지출결의서 외상매출금')}</td></tr>` : ''}
+          ${(!d.arTax && !d.arWage) ? `<tr class="fs-item" style="color:var(--tm)"><td>매출채권 (없음)</td><td>${fmtFS(0)}</td></tr>` : ''}
           <tr class="fs-item"><td>선급금 (승인 대기 지출)</td><td>${D('expReq:ALL','지출결의서(승인대기)',d.prepaid)}</td></tr>
           <tr class="fs-subtotal"><td><b>자산 총계</b></td><td>${fmtFS(d.totalAssets)}</td></tr>
         </tbody></table>
