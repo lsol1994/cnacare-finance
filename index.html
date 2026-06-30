@@ -3356,16 +3356,17 @@ function getDrillRows(key, start, end) {
       }));
 
   } else if(src === 'ledger_income') {
-    // ★ 입출금 입금 — calcFSData의 ledSale/otherInc/paidIn과 동일 기준
+    // ★ 입출금 입금 — calcFSData ledSale와 동일 기준
+    const SALE_ACCTS_D      = ['매출액'];
+    const CAPITAL_ACCTS_D   = ['보통주자본금'];
+    const OTHER_INCOME_D    = ['기타수입','이자수익'];
     ledger
       .filter(t => t.type==='income' && inRange(t.date))
       .filter(t => {
-        if(acct === 'ALL') {
-          // 매출 전체: 자본금·영업외수익 제외 (calcFSData ledSale 기준)
-          return !CAPITAL_ACCTS.includes(t.acct) && !OTHER_INCOME_ACCTS.includes(t.acct);
-        }
+        if(acct === 'ALL') return SALE_ACCTS_D.includes(t.acct); // 매출액 계정만
         if(acct === '기타수입' || acct === '이자수익') return t.acct===acct;
-        if(acct === '보통주자본금') return CAPITAL_ACCTS.includes(t.acct);
+        if(acct === '보통주자본금') return CAPITAL_ACCTS_D.includes(t.acct);
+        if(acct === '단기차입금') return t.acct==='단기차입금';
         return t.acct===acct;
       })
       .forEach(t => rows.push({
@@ -3402,21 +3403,30 @@ function getDrillRows(key, start, end) {
 
   } else if(src === 'expReq') {
     if(acct === 'wage') {
-      // 외상매출금: 예상매출액 - 지급 급여 = 수수료 미수금
+      // 외상매출금 = 지출결의서 예상매출액 합계 - 입출금 매출액 합계
+      const totalExp = expReqs
+        .filter(t => Number(t.expectedRev||0) > 0)
+        .reduce((s,t) => s+Number(t.expectedRev||0), 0);
+      const totalReceived = ledger
+        .filter(t => t.type==='income' && t.acct==='매출액')
+        .reduce((s,t) => s+Number(t.amount||0), 0);
+
+      // 지출결의서 예상매출액 목록
       expReqs
-        .filter(t => t.acct==='급여' && Number(t.expectedRev||0) > 0)
-        .forEach(t => {
-          const rev  = Number(t.expectedRev||0);
-          const wage = Number(t.amount||0);
-          const net  = Math.max(rev - wage, 0);
-          if(net > 0) rows.push({
-            date: t.payDate||t.draftDate, acct: '외상매출금',
-            partner: t.client||t.payee||'',
-            desc: `${t.title} (간병 ${t.careDays||0}일) | 예상매출 ${rev.toLocaleString()} - 급여 ${wage.toLocaleString()}`,
-            amount: net,
-            note: `수수료 ${((t.careDays||0)*5000).toLocaleString()}원`
-          });
-        });
+        .filter(t => Number(t.expectedRev||0) > 0)
+        .forEach(t => rows.push({
+          date: t.payDate||t.draftDate, acct: '예상매출액',
+          partner: t.client||t.payee||'',
+          desc: `${t.title} (간병 ${t.careDays||0}일)`,
+          amount: Number(t.expectedRev||0),
+          note: t.acct||''
+        }));
+      // 실 수령 매출액 차감 행
+      if(totalReceived > 0) rows.push({
+        date: '', acct: '(-) 입금 매출액',
+        partner: '', desc: '입출금내역 매출액 계정 입금 합계 (차감)',
+        amount: -totalReceived, note: '수령 완료'
+      });
     } else if(acct === 'unpaid') {
       // 미지급금: 대기 상태 지출결의서
       expReqs
@@ -3622,14 +3632,14 @@ function calcFSData(prefix) {
   const ledPeriod = fsFilter(ledger, 'date', start, end);
 
   // ── 매출액: 입출금 입금 중 매출 계정과목 ──
-  const INCOME_ACCTS = ['매출액','매출','간병비','요양비','케어비'];  // 매출로 볼 계정과목
-  const CAPITAL_ACCTS = ['보통주자본금'];                            // 자본 투입 (매출 제외)
-  const OTHER_INCOME_ACCTS = ['기타수입','이자수익'];                 // 영업외수익
+  const CAPITAL_ACCTS      = ['보통주자본금'];
+  const OTHER_INCOME_ACCTS = ['기타수입','이자수익'];
+  const SALE_ACCTS         = ['매출액'];  // 실 입금된 매출만
 
+  // 매출액: 계정과목이 '매출액'인 실 입금 내역만
   const ledSale = ledPeriod.filter(t =>
     t.type === 'income' &&
-    !CAPITAL_ACCTS.includes(t.acct) &&
-    !OTHER_INCOME_ACCTS.includes(t.acct)
+    SALE_ACCTS.includes(t.acct)
   );
   const totalRev = ledSale.reduce((s,t) => s+Number(t.amount||0), 0);
 
@@ -3672,15 +3682,16 @@ function calcFSData(prefix) {
   // ══════════════════════════════════════
 
   // ── 자산 ──
-  // ① 외상매출금: 예상매출액 - 지급된 급여총액 = 수수료 미수금
-  //    (예상매출액 = 급여 + 수수료, 이미 급여는 지급했으므로 차액이 미수금)
-  const bsArWage = expReqs
-    .filter(t => t.acct==='급여' && Number(t.expectedRev||0) > 0)
-    .reduce((s,t) => {
-      const rev  = Number(t.expectedRev||0); // 업체에 청구할 예상매출액
-      const wage = Number(t.amount||0);       // 이미 지급한 급여
-      return s + Math.max(rev - wage, 0);     // 차액(수수료)만 외상매출금
-    }, 0);
+  // ① 외상매출금 = 지출결의서 예상매출액 합계 - 입출금내역 매출액 합계
+  const totalExpectedAR = expReqs
+    .filter(t => Number(t.expectedRev||0) > 0)
+    .reduce((s,t) => s + Number(t.expectedRev||0), 0);
+
+  const totalReceivedRev = ledger
+    .filter(t => t.type==='income' && t.acct==='매출액')
+    .reduce((s,t) => s + Number(t.amount||0), 0);
+
+  const bsArWage = Math.max(totalExpectedAR - totalReceivedRev, 0);
 
   // ② 선급금: 승인 상태(미지급) 지출결의서
   const bsPrepaid = expReqs
@@ -3723,7 +3734,7 @@ function calcFSData(prefix) {
   // 이익잉여금: 창립 이래 기간 말(end)까지 누적 손익
   const allToEnd = ledger.filter(l => l.date <= end);
   const cumRev = allToEnd
-    .filter(t => t.type==='income' && !CAPITAL_ACCTS.includes(t.acct) && !OTHER_INCOME_ACCTS.includes(t.acct))
+    .filter(t => t.type==='income' && t.acct==='매출액')
     .reduce((s,t) => s+Number(t.amount||0), 0);
   const cumCogs = taxInv
     .filter(t => t.ditype==='매입' && t.date <= end)
