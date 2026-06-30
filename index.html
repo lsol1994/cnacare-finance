@@ -3168,42 +3168,89 @@ let _drillData = []; // 현재 모달 데이터 (CSV/인쇄용)
 function getDrillRows(key, start, end) {
   const [src, acct] = key.split(':');
   const rows = [];
-  const inRange = d => d >= start && d <= end;
+
+  // calcFSData와 동일한 기간 조건
+  const inRange = d => {
+    if(!d) return false;
+    const ds = String(d).slice(0,10);
+    return ds >= start && ds <= end;
+  };
+
+  // calcFSData와 동일한 계정 분류
+  const CAPITAL_ACCTS      = ['보통주자본금'];
+  const OTHER_INCOME_ACCTS = ['기타수입','이자수익'];
+  const SGA_ACCTS = ['급여','복리후생비','보험료','인쇄비','소모품비','접대비',
+                     '임차료','통신비','차량유지비','외주비','세금과공과'];
 
   if(src === 'taxSale') {
-    // 세금계산서 매출 (참고용)
-    taxInv.filter(t => t.ditype==='매출' && inRange((t.date||'').slice(0,10)))
+    // 세금계산서 매출 (참고)
+    taxInv
+      .filter(t => t.ditype==='매출' && inRange(t.date))
       .forEach(t => rows.push({
         date: t.date, acct: t.acct||'매출액',
         partner: t.company||'', desc: `${t.kind||''} ${t.item||''}`.trim(),
         amount: Number(t.supply||0), note: t.status||''
       }));
+
   } else if(src === 'taxBuy') {
     // 세금계산서 매입
-    taxInv.filter(t => t.ditype==='매입' && inRange((t.date||'').slice(0,10)))
+    taxInv
+      .filter(t => t.ditype==='매입' && inRange(t.date))
       .forEach(t => rows.push({
         date: t.date, acct: t.acct||'매입원가',
         partner: t.company||'', desc: `${t.kind||''} ${t.item||''}`.trim(),
         amount: Number(t.supply||0), note: t.status||''
       }));
-  } else if(src === 'ledger' || src === 'ledger_income' || src === 'ledger_exp') {
-    // ★ 입출금 내역 기준 (단일 소스)
+
+  } else if(src === 'ledger_income') {
+    // ★ 입출금 입금 — calcFSData의 ledSale/otherInc/paidIn과 동일 기준
     ledger
+      .filter(t => t.type==='income' && inRange(t.date))
       .filter(t => {
-        if(!inRange(t.date)) return false;
-        if(src === 'ledger_income') return t.type === 'income'  && (acct==='ALL' || t.acct===acct);
-        if(src === 'ledger_exp')    return t.type === 'expense' && (acct==='ALL' || t.acct===acct);
-        return acct==='ALL' || t.acct===acct;
+        if(acct === 'ALL') {
+          // 매출 전체: 자본금·영업외수익 제외 (calcFSData ledSale 기준)
+          return !CAPITAL_ACCTS.includes(t.acct) && !OTHER_INCOME_ACCTS.includes(t.acct);
+        }
+        if(acct === '기타수입' || acct === '이자수익') return t.acct===acct;
+        if(acct === '보통주자본금') return CAPITAL_ACCTS.includes(t.acct);
+        return t.acct===acct;
       })
       .forEach(t => rows.push({
         date: t.date, acct: t.acct||'',
         partner: t.bank||'', desc: t.desc||'',
         amount: Number(t.amount||0), note: t.note||''
       }));
+
+  } else if(src === 'ledger_exp') {
+    // ★ 입출금 출금 — calcFSData의 sgaMap과 동일 기준
+    ledger
+      .filter(t => t.type==='expense' && inRange(t.date))
+      .filter(t => {
+        if(acct === 'ALL') return true;
+        // 계정과목 일치 또는 '기타'로 묶인 것
+        if(acct === '기타') return !SGA_ACCTS.includes(t.acct);
+        return t.acct===acct;
+      })
+      .forEach(t => rows.push({
+        date: t.date, acct: t.acct||'',
+        partner: t.bank||'', desc: t.desc||'',
+        amount: Number(t.amount||0), note: t.note||''
+      }));
+
+  } else if(src === 'ledger') {
+    // 입출금 전체 (재무상태표 현금 등)
+    ledger
+      .filter(t => inRange(t.date) && (acct==='ALL' || t.acct===acct))
+      .forEach(t => rows.push({
+        date: t.date, acct: t.acct||'',
+        partner: t.bank||'', desc: t.desc||'',
+        amount: Number(t.amount||0), note: t.note||''
+      }));
+
   } else if(src === 'expReq') {
-    // 지출결의서 (선급금 상세용)
+    // 지출결의서 승인 대기 (선급금)
     expReqs
-      .filter(t => t.status==='승인' && inRange(t.draftDate||''))
+      .filter(t => t.status==='승인' && inRange(t.draftDate))
       .forEach(t => rows.push({
         date: t.payDate||t.draftDate, acct: t.acct||'',
         partner: t.payee||'', desc: t.title||'',
@@ -3215,6 +3262,7 @@ function getDrillRows(key, start, end) {
 }
 
 
+
 function openDrill(key, label, expectedTotal) {
   // 현재 활성 재무제표 페이지의 기간 파악
   const active = document.querySelector('.page.active');
@@ -3223,7 +3271,8 @@ function openDrill(key, label, expectedTotal) {
   const from = document.getElementById(`${prefix}-from`)?.value || '01';
   const to   = document.getElementById(`${prefix}-to`)?.value   || '12';
   const start = `${yr}-${from}-01`;
-  const end   = `${yr}-${to}-31`;
+  const endDay2 = new Date(parseInt(yr), parseInt(to), 0).getDate();
+  const end   = `${yr}-${to}-${String(endDay2).padStart(2,'0')}`;
   const period = `${yr}년 ${parseInt(from)}월 ~ ${parseInt(to)}월`;
 
   // 모달 열기 + 로딩
@@ -3376,7 +3425,9 @@ function calcFSData(prefix) {
   const mo2 = fsTab==='month' ? (document.getElementById(`${prefix}-to`)?.value||'12')   : '12';
 
   const start = `${yr}-${mo1}-01`;
-  const end   = `${yr}-${mo2}-31`;
+  // 실제 월말 계산 (28/29/30/31일 정확히)
+  const endDay = new Date(parseInt(yr), parseInt(mo2), 0).getDate();
+  const end   = `${yr}-${mo2}-${String(endDay).padStart(2,'0')}`;
   const label = fsTab==='month'
     ? (mo1===mo2 ? `${yr}년 ${parseInt(mo1)}월` : `${yr}년 ${parseInt(mo1)}~${parseInt(mo2)}월`)
     : `${yr}년 (연간)`;
