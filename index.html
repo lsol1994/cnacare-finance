@@ -3746,7 +3746,9 @@ function calcFSData(prefix) {
   let bsRetainedLabel = '';
   if(fsTab === 'month') {
     // 전월: mo1 기준 1개월 전
-    const prevDate  = new Date(parseInt(yr), parseInt(mo1)-1, 1);
+    // JS Date 월은 0-indexed이므로 parseInt(mo1)-2 = 실제 전월
+    // 예) mo1='06' → parseInt('06')=6 → 6-2=4 → Date month 4 = 5월 ✓
+    const prevDate  = new Date(parseInt(yr), parseInt(mo1)-2, 1);
     const prevYr    = prevDate.getFullYear();
     const prevMo    = String(prevDate.getMonth()+1).padStart(2,'0');
     const prevStart = `${prevYr}-${prevMo}-01`;
