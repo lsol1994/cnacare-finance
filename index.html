@@ -3078,12 +3078,15 @@ function openExpView(id) {
       ${t.acct==='급여' && t.expectedRev ? `
       <div style="margin-top:10px;padding:10px 12px;background:var(--PU);border:1px solid var(--P);border-radius:var(--r2)">
         <div style="font-size:12px;font-weight:700;color:var(--P);margin-bottom:6px">💡 외상매출금 (미수금) 내역</div>
-        <div class="ev-row" style="border:none;padding:3px 0"><span class="ev-label" style="width:80px">간병일수</span><span class="ev-val">${t.careDays||'-'}일</span></div>
-        <div class="ev-row" style="border:none;padding:3px 0"><span class="ev-label" style="width:80px">수수료</span><span class="ev-val">${((t.careDays||0)*5000).toLocaleString('ko-KR')}원 (5,000원 × ${t.careDays||0}일)</span></div>
-        <div class="ev-row" style="border:none;padding:3px 0"><span class="ev-label" style="width:80px">업체명</span><span class="ev-val">${t.client||'-'}</span></div>
-        <div class="ev-row" style="border:none;padding:3px 0;border-top:1px solid var(--bd);margin-top:4px">
-          <span class="ev-label" style="width:80px;color:var(--P);font-weight:700">예상매출액</span>
-          <span class="ev-val" style="color:var(--P);font-weight:700;font-size:15px">${Number(t.expectedRev).toLocaleString('ko-KR')}원</span>
+        <div class="ev-row" style="border:none;padding:3px 0"><span class="ev-label" style="width:100px">간병일수</span><span class="ev-val">${t.careDays||'-'}일</span></div>
+        <div class="ev-row" style="border:none;padding:3px 0"><span class="ev-label" style="width:100px">수수료</span><span class="ev-val">${((t.careDays||0)*5000).toLocaleString('ko-KR')}원 (5,000원 × ${t.careDays||0}일)</span></div>
+        <div class="ev-row" style="border:none;padding:3px 0"><span class="ev-label" style="width:100px">업체명</span><span class="ev-val">${t.client||'-'}</span></div>
+        <div class="ev-row" style="border:none;padding:3px 0"><span class="ev-label" style="width:100px">예상매출액</span><span class="ev-val">${Number(t.expectedRev).toLocaleString('ko-KR')}원</span></div>
+        <div class="ev-row" style="border:none;padding:3px 0"><span class="ev-label" style="width:100px">지급 급여</span><span class="ev-val" style="color:var(--R)">- ${Number(t.amount).toLocaleString('ko-KR')}원</span></div>
+        <div class="ev-row" style="border:none;padding:4px 0 0;border-top:1px solid var(--bd);margin-top:4px">
+          <span class="ev-label" style="width:100px;color:var(--P);font-weight:700">외상매출금</span>
+          <span class="ev-val" style="color:var(--P);font-weight:700;font-size:15px">${Math.max(Number(t.expectedRev)-Number(t.amount),0).toLocaleString('ko-KR')}원</span>
+          <span style="font-size:11px;color:var(--tm);margin-left:6px">(예상매출액 - 급여)</span>
         </div>
       </div>` : ''}
       ${(t.status==='승인'||t.status==='대기')?(()=>{
@@ -3399,14 +3402,21 @@ function getDrillRows(key, start, end) {
 
   } else if(src === 'expReq') {
     if(acct === 'wage') {
-      // 외상매출금: 급여 계정 중 expectedRev 있는 것
+      // 외상매출금: 예상매출액 - 지급 급여 = 수수료 미수금
       expReqs
         .filter(t => t.acct==='급여' && Number(t.expectedRev||0) > 0)
-        .forEach(t => rows.push({
-          date: t.payDate||t.draftDate, acct: '외상매출금',
-          partner: t.client||t.payee||'', desc: `${t.title} (간병 ${t.careDays||0}일)`,
-          amount: Number(t.expectedRev||0), note: `급여 ${Number(t.amount).toLocaleString()}원 + 수수료 ${((t.careDays||0)*5000).toLocaleString()}원`
-        }));
+        .forEach(t => {
+          const rev  = Number(t.expectedRev||0);
+          const wage = Number(t.amount||0);
+          const net  = Math.max(rev - wage, 0);
+          if(net > 0) rows.push({
+            date: t.payDate||t.draftDate, acct: '외상매출금',
+            partner: t.client||t.payee||'',
+            desc: `${t.title} (간병 ${t.careDays||0}일) | 예상매출 ${rev.toLocaleString()} - 급여 ${wage.toLocaleString()}`,
+            amount: net,
+            note: `수수료 ${((t.careDays||0)*5000).toLocaleString()}원`
+          });
+        });
     } else if(acct === 'unpaid') {
       // 미지급금: 대기 상태 지출결의서
       expReqs
@@ -3662,10 +3672,15 @@ function calcFSData(prefix) {
   // ══════════════════════════════════════
 
   // ── 자산 ──
-  // ① 외상매출금: 급여 지출결의서에 입력한 예상매출액 (미수금)
+  // ① 외상매출금: 예상매출액 - 지급된 급여총액 = 수수료 미수금
+  //    (예상매출액 = 급여 + 수수료, 이미 급여는 지급했으므로 차액이 미수금)
   const bsArWage = expReqs
     .filter(t => t.acct==='급여' && Number(t.expectedRev||0) > 0)
-    .reduce((s,t) => s+Number(t.expectedRev||0), 0);
+    .reduce((s,t) => {
+      const rev  = Number(t.expectedRev||0); // 업체에 청구할 예상매출액
+      const wage = Number(t.amount||0);       // 이미 지급한 급여
+      return s + Math.max(rev - wage, 0);     // 차액(수수료)만 외상매출금
+    }, 0);
 
   // ② 선급금: 승인 상태(미지급) 지출결의서
   const bsPrepaid = expReqs
@@ -3710,8 +3725,41 @@ function calcFSData(prefix) {
     .filter(t => t.type==='income' && t.acct==='보통주자본금')
     .reduce((s,t) => s+Number(t.amount||0), 0);
 
-  // ② 이익잉여금: 당기순이익 (전기이월은 설정에서 수동 입력)
-  const bsRetained = netIncome;
+  // ② 이익잉여금: 조회기간의 직전 기간 당기순이익
+  //    월별 조회 → 전월 / 연도별 조회 → 전년도
+  const calcNetIncomePeriod = (pStart, pEnd) => {
+    const pLed = ledger.filter(l => l.date >= pStart && l.date <= pEnd);
+    const pRev  = pLed.filter(t=>t.type==='income'&&!CAPITAL_ACCTS.includes(t.acct)&&!OTHER_INCOME_ACCTS.includes(t.acct))
+                      .reduce((s,t)=>s+Number(t.amount||0),0);
+    const pCogs = taxInv.filter(t=>t.ditype==='매입'&&t.date>=pStart&&t.date<=pEnd)
+                        .reduce((s,t)=>s+Number(t.supply||0),0);
+    const pSGA  = pLed.filter(t=>t.type==='expense')
+                      .reduce((s,t)=>s+Number(t.amount||0),0);
+    const pOtherInc = pLed.filter(t=>t.type==='income'&&OTHER_INCOME_ACCTS.includes(t.acct))
+                          .reduce((s,t)=>s+Number(t.amount||0),0);
+    const pIntExp   = pLed.filter(t=>t.type==='expense'&&t.acct==='이자비용')
+                          .reduce((s,t)=>s+Number(t.amount||0),0);
+    return pRev - pCogs - pSGA + pOtherInc - pIntExp;
+  };
+
+  let bsRetained = 0;
+  let bsRetainedLabel = '';
+  if(fsTab === 'month') {
+    // 전월: mo1 기준 1개월 전
+    const prevDate  = new Date(parseInt(yr), parseInt(mo1)-1, 1);
+    const prevYr    = prevDate.getFullYear();
+    const prevMo    = String(prevDate.getMonth()+1).padStart(2,'0');
+    const prevStart = `${prevYr}-${prevMo}-01`;
+    const prevEndDay= new Date(prevYr, prevDate.getMonth()+1, 0).getDate();
+    const prevEnd   = `${prevYr}-${prevMo}-${String(prevEndDay).padStart(2,'0')}`;
+    bsRetained      = calcNetIncomePeriod(prevStart, prevEnd);
+    bsRetainedLabel = `${prevYr}년 ${parseInt(prevMo)}월 당기순이익`;
+  } else {
+    // 전년도
+    const prevYr    = parseInt(yr) - 1;
+    bsRetained      = calcNetIncomePeriod(`${prevYr}-01-01`, `${prevYr}-12-31`);
+    bsRetainedLabel = `${prevYr}년 연간 당기순이익`;
+  }
 
   // 전기이월 이익잉여금 (시스템 설정에 저장된 값)
   let bsCarryOver = 0;
@@ -3751,7 +3799,7 @@ function calcFSData(prefix) {
     // 재무상태표 세부항목
     bsArWage, bsPrepaid, bsCash, bsArTax,
     bsShortLoan, bsUnpaid, bsApTax,
-    bsCapital, bsRetained, bsCarryOver,
+    bsCapital, bsRetained, bsRetainedLabel, bsCarryOver,
   };
 }
 
@@ -3941,7 +3989,7 @@ function renderBS(d, forPrint=false) {
               </tr>
               <tr class="fs-item">
                 <td>이익잉여금</td>
-                <td style="font-size:11px;color:#888">당기순이익 ← 손익계산서</td>
+                <td style="font-size:11px;color:#888">${d.bsRetainedLabel||'전기 당기순이익'}</td>
                 <td>${fmtFS(d.bsRetained)}</td>
               </tr>
               ${d.bsCarryOver ? `
