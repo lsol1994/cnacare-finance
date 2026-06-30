@@ -221,7 +221,53 @@ tbody tr:hover td{background:var(--PU)}
 @media print{
   .sidebar,.topbar,.botnav,.fab,.ab,.fb .btn,.txc-ac,.mo{display:none!important}
   .main-wrap{margin-left:0}.card{box-shadow:none;border:1px solid #ccc}
+  .no-print{display:none!important}
+  .main{padding:0!important}
+  body{background:#fff!important}
+  .fs-wrap{padding:10mm 12mm;font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif}
+  .fs-section{page-break-inside:avoid;margin-bottom:8mm}
+  .fs-tbl{border-collapse:collapse;width:100%;font-size:9pt}
+  .fs-tbl th,.fs-tbl td{border:1px solid #777;padding:3px 7px}
+  .fs-page-break{page-break-before:always}
+  @page{size:A4 portrait;margin:8mm}
 }
+/* 재무제표 공통 스타일 */
+.fs-filter{background:var(--sf);border:1px solid var(--bd);border-radius:var(--r);padding:12px 16px;margin-bottom:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.fs-tab-group{display:flex;border:1px solid var(--bd);border-radius:var(--r2);overflow:hidden}
+.fs-tab{padding:6px 16px;font-size:12.5px;border:none;cursor:pointer;transition:all .15s}
+.fs-tab.active{background:var(--P);color:#fff}
+.fs-tab:not(.active){background:transparent;color:var(--t2)}
+.fs-wrap{background:#fff;padding:16px}
+.fs-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;border-bottom:2.5px solid #1a1a1a;padding-bottom:10px}
+.fs-main-title{font-size:20px;font-weight:800;color:#111;letter-spacing:-0.5px}
+.fs-sub-title{font-size:13px;color:#666;margin-top:4px}
+.fs-stamp{text-align:right;font-size:11px;color:#444;line-height:1.9}
+.fs-stamp-table{border-collapse:collapse;margin-left:auto;margin-top:6px}
+.fs-stamp-table th{border:1px solid #999;padding:3px 12px;font-size:10px;background:#f0f0f0;font-weight:600}
+.fs-stamp-table td{border:1px solid #999;padding:3px 12px;font-size:10.5px;height:26px;min-width:54px}
+.fs-section{margin-bottom:18px}
+.fs-section-title{font-size:12px;font-weight:700;color:#fff;background:#374151;padding:5px 12px;margin-bottom:0;letter-spacing:0.3px}
+.fs-tbl{width:100%;border-collapse:collapse;font-size:12.5px}
+.fs-tbl th{background:#f8f9fa;font-weight:600;color:#333;padding:6px 10px;border:1px solid #d1d5db;text-align:left;font-size:11.5px}
+.fs-tbl td{padding:5px 10px;border:1px solid #e5e7eb;color:#222}
+.fs-tbl .fs-item td{padding-left:24px;font-size:12px;color:#444}
+.fs-tbl .fs-subtotal td{background:#f0f4ff;font-weight:700;border-top:1.5px solid #9ca3af}
+.fs-tbl .fs-total td{background:#1e3a5f;color:#fff;font-weight:700;font-size:13px}
+.fs-tbl .fs-balance-ok td{background:#d1fae5;color:#065f46;font-weight:700}
+.fs-tbl .fs-balance-err td{background:#fee2e2;color:#991b1b;font-weight:700}
+.fs-tbl td:last-child,.fs-tbl th:last-child{text-align:right}
+.fs-tbl td:nth-last-child(2),.fs-tbl th:nth-last-child(2){text-align:right}
+.fs-neg{color:#dc2626!important;font-weight:600}
+.fs-pos{color:#15803d!important}
+.fs-zero{color:#9ca3af}
+.fs-summary-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:14px}
+.fs-balance-badge{display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:20px;font-size:12.5px;font-weight:700;margin-top:10px}
+.fs-balance-badge.ok{background:#d1fae5;color:#065f46}
+.fs-balance-badge.err{background:#fee2e2;color:#991b1b}
+/* 좌우 2단 레이아웃 (재무상태표) */
+.bs-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:860px){.bs-grid{grid-template-columns:1fr}.fs-summary-grid{grid-template-columns:1fr 1fr}}
+
 /* Period filter btn */
 .db-period-btn{transition:all .13s}
 .db-period-btn.active{background:var(--P);color:#fff;border-color:var(--P)}
@@ -292,6 +338,14 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
       <div class="sb-children">
         <div class="sb-i" data-page="sum-year" onclick="nav(this)"><span class="si">📊</span><span class="sn">연도별 요약</span></div>
         <div class="sb-i" data-page="sum-month" onclick="nav(this)"><span class="si">📅</span><span class="sn">월별 요약</span></div>
+      </div>
+    </div>
+    <div class="sb-grp">
+      <div class="sb-gl" onclick="toggleGrp(this)"><span>재무제표</span><span class="sb-gl-ic">▶</span></div>
+      <div class="sb-children">
+        <div class="sb-i" data-page="fs-report" onclick="nav(this)"><span class="si">📑</span><span class="sn">손익계산서</span></div>
+        <div class="sb-i" data-page="bs-report" onclick="nav(this)"><span class="si">⚖️</span><span class="sn">재무상태표</span></div>
+        <div class="sb-i" data-page="tb-report" onclick="nav(this)"><span class="si">📋</span><span class="sn">합계잔액시산표</span></div>
       </div>
     </div>
     <div class="sb-grp">
@@ -628,6 +682,48 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
   <div class="card"><div class="tw"><table><thead><tr><th style="text-align:left">연월</th><th style="text-align:right">입금 합계</th><th style="text-align:right">출금 합계</th><th style="text-align:right">카드 합계</th><th style="text-align:right">순수지</th><th style="text-align:right">건수</th></tr></thead><tbody id="mtb"></tbody></table></div><div class="empty" id="mempty" style="display:none"><span class="empty-ic">📅</span><div class="empty-t">데이터가 없습니다</div></div></div>
 </div>
  
+<!-- 공통 재무제표 필터 컴포넌트 (JS로 각 페이지에 삽입) -->
+
+<!-- 손익계산서 -->
+<div id="p-fs-report" class="page">
+  <div class="ph no-print">
+    <div><div class="ph-t">손익계산서</div><div class="ph-s">Income Statement · 개인사업자 기준</div></div>
+    <div class="ab" style="gap:6px">
+      <button class="btn" onclick="printFS('single')">🖨 현재 장부 인쇄</button>
+      <button class="btn p" onclick="printFS('all')">📄 재무제표 통합 인쇄</button>
+    </div>
+  </div>
+  <div id="fs-filter-wrap"></div>
+  <div id="fs-report-body"></div>
+</div>
+
+<!-- 재무상태표 -->
+<div id="p-bs-report" class="page">
+  <div class="ph no-print">
+    <div><div class="ph-t">재무상태표</div><div class="ph-s">Balance Sheet · 개인사업자 기준</div></div>
+    <div class="ab" style="gap:6px">
+      <button class="btn" onclick="printFS('single')">🖨 현재 장부 인쇄</button>
+      <button class="btn p" onclick="printFS('all')">📄 재무제표 통합 인쇄</button>
+    </div>
+  </div>
+  <div id="bs-filter-wrap"></div>
+  <div id="bs-report-body"></div>
+</div>
+
+<!-- 합계잔액시산표 -->
+<div id="p-tb-report" class="page">
+  <div class="ph no-print">
+    <div><div class="ph-t">합계잔액시산표</div><div class="ph-s">Trial Balance · 차대 균형 검증</div></div>
+    <div class="ab" style="gap:6px">
+      <button class="btn" onclick="printFS('single')">🖨 현재 장부 인쇄</button>
+      <button class="btn p" onclick="printFS('all')">📄 재무제표 통합 인쇄</button>
+    </div>
+  </div>
+  <div id="tb-filter-wrap"></div>
+  <div id="tb-report-body"></div>
+</div>
+
+
 <!-- 시스템 설정 -->
 <div id="p-set-system" class="page">
   <div class="ph"><div><div class="ph-t">시스템 설정</div><div class="ph-s">회사 정보 및 기본 설정</div></div></div>
@@ -1202,6 +1298,9 @@ function nav(el) {
   }
   // page init
   if(pid==='dashboard')   renderDashboard();
+  if(pid==='fs-report')   { renderFS('fs'); }
+  if(pid==='bs-report')   { renderFS('bs'); }
+  if(pid==='tb-report')   { renderFS('tb'); }
   if(pid==='exp-req')     renderExp();
   if(pid==='exp-today')   renderExpToday();
   if(pid==='sum-year')     renderYear();
@@ -2934,6 +3033,465 @@ function expExp(fmt2) {
   }
 }
  
+/* ═══════ 재무제표 (FINANCIAL STATEMENTS) ═══════ */
+
+/* ── 공통 상태 ── */
+let fsTab   = 'month';  // 'month' | 'year'
+let fsCurPage = 'fs';   // 'fs' | 'bs' | 'tb'  (현재 활성 장부)
+
+/* ── 공통 필터 HTML 생성기 ── */
+function makeFsFilter(prefix) {
+  const mo = new Date().getMonth() + 1;
+  const mo2 = String(mo).padStart(2,'0');
+  const moOpts = Array.from({length:12},(_,i)=>{
+    const v = String(i+1).padStart(2,'0');
+    return `<option value="${v}"${v===mo2?' selected':''}>${i+1}월</option>`;
+  }).join('');
+
+  return `<div class="fs-filter no-print">
+    <div class="fs-tab-group">
+      <button class="fs-tab active" id="${prefix}-tab-month" onclick="setFsTab('month','${prefix}')">월별</button>
+      <button class="fs-tab" id="${prefix}-tab-year"  onclick="setFsTab('year','${prefix}')">연도별</button>
+    </div>
+    <select class="fs" id="${prefix}-year" onchange="renderFS('${prefix}')" style="width:82px">
+      <option>2026</option><option>2025</option><option>2024</option>
+    </select>
+    <div id="${prefix}-mwrap" style="display:flex;gap:6px;align-items:center">
+      <select class="fs" id="${prefix}-from" onchange="renderFS('${prefix}')" style="width:72px">${moOpts}</select>
+      <span style="font-size:12px;color:var(--t3)">~</span>
+      <select class="fs" id="${prefix}-to"   onchange="renderFS('${prefix}')" style="width:72px">${moOpts}</select>
+    </div>
+    <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--t3);margin-left:auto">
+      매출원가 마진율
+      <input type="number" id="${prefix}-margin" value="80" min="0" max="100"
+        oninput="renderFS('${prefix}')"
+        style="width:52px;padding:4px 7px;border:1px solid var(--bd);border-radius:var(--r2);font-size:12.5px;text-align:center">
+      %
+    </label>
+  </div>`;
+}
+
+function setFsTab(tab, prefix) {
+  fsTab = tab;
+  ['month','year'].forEach(t => {
+    const b = document.getElementById(`${prefix}-tab-${t}`);
+    if(b){ b.classList.toggle('active', t===tab); }
+  });
+  const mw = document.getElementById(`${prefix}-mwrap`);
+  if(mw) mw.style.display = tab==='month' ? '' : 'none';
+  renderFS(prefix);
+}
+
+/* ── 금액 포맷 ── */
+function fmtFS(v) {
+  if(v===null||v===undefined) return '<span class="fs-zero">-</span>';
+  const n = Math.round(v);
+  if(n===0) return '<span class="fs-zero">-</span>';
+  const abs = Math.abs(n).toLocaleString('ko-KR');
+  return n<0 ? `<span class="fs-neg">(${abs})</span>` : abs;
+}
+function fmtFSRaw(v) {
+  if(!v) return '-';
+  const n = Math.round(v), abs = Math.abs(n).toLocaleString('ko-KR');
+  return n<0 ? `(${abs})` : abs;
+}
+
+/* ── 기간 필터 ── */
+function fsFilter(arr, dateField, start, end) {
+  return arr.filter(t => { const d=(t[dateField]||'').slice(0,10); return d>=start && d<=end; });
+}
+
+/* ── 시스템 정보 ── */
+function getSysInfo() {
+  const d = {company:'씨앤에이케어', ceo:'김현미', bizno:'224-81-53908'};
+  try {
+    const g = id => document.getElementById(id)?.value;
+    if(g('sys-company')) d.company = g('sys-company');
+    if(g('sys-ceo'))     d.ceo     = g('sys-ceo');
+    if(g('sys-bizno'))   d.bizno   = g('sys-bizno');
+  } catch(e){}
+  return d;
+}
+
+/* ── 보고서 헤더 HTML ── */
+function fsHeader(title, sub, period) {
+  const si = getSysInfo();
+  const now = new Date().toLocaleDateString('ko-KR',{year:'numeric',month:'long',day:'numeric',hour:'2-digit',minute:'2-digit'});
+  return `<div class="fs-header">
+    <div>
+      <div class="fs-main-title">${title}</div>
+      <div class="fs-sub-title">${sub}</div>
+      <div style="font-size:12px;color:#888;margin-top:4px">${period}</div>
+    </div>
+    <div class="fs-stamp">
+      <div>${si.company} | 대표 ${si.ceo} | 사업자 ${si.bizno}</div>
+      <div style="font-size:10px;color:#999">출력: ${now}</div>
+      <table class="fs-stamp-table" style="margin-top:5px">
+        <tr><th>담당</th><th>검토</th><th>대표</th></tr>
+        <tr><td></td><td></td><td></td></tr>
+      </table>
+    </div>
+  </div>`;
+}
+
+/* ── 공통 데이터 계산 ── */
+function calcFSData(prefix) {
+  const yr  = document.getElementById(`${prefix}-year`)?.value || '2026';
+  const mo1 = fsTab==='month' ? (document.getElementById(`${prefix}-from`)?.value||'01') : '01';
+  const mo2 = fsTab==='month' ? (document.getElementById(`${prefix}-to`)?.value||'12')   : '12';
+  const mg  = parseFloat(document.getElementById(`${prefix}-margin`)?.value||'80')/100;
+
+  const start = `${yr}-${mo1}-01`;
+  const end   = `${yr}-${mo2}-31`;
+  const label = fsTab==='month'
+    ? (mo1===mo2 ? `${yr}년 ${parseInt(mo1)}월` : `${yr}년 ${parseInt(mo1)}~${parseInt(mo2)}월`)
+    : `${yr}년 (연간)`;
+
+  // ── 매출 ──
+  const taxSale = fsFilter(taxInv,'date',start,end).filter(t=>t.ditype==='매출');
+  const taxSaleAmt = taxSale.reduce((s,t)=>s+Number(t.supply||0),0);
+  const ledIncome  = fsFilter(ledger,'date',start,end)
+    .filter(t=>t.type==='income' && !['보통주자본금','기타수입','이자수익'].includes(t.acct));
+  const ledIncomeAmt = ledIncome.reduce((s,t)=>s+Number(t.amount||0),0);
+  const totalRev = taxSaleAmt + ledIncomeAmt;
+
+  // ── 매출원가 ──
+  const taxBuy    = fsFilter(taxInv,'date',start,end).filter(t=>t.ditype==='매입');
+  const taxBuyAmt = taxBuy.reduce((s,t)=>s+Number(t.supply||0),0);
+  const cogs      = taxBuyAmt>0 ? taxBuyAmt : Math.round(totalRev*(1-mg));
+  const cogsNote  = taxBuyAmt>0 ? '세금계산서 매입 기준' : `마진율${Math.round(mg*100)}% 적용`;
+  const grossProfit = totalRev - cogs;
+
+  // ── 판관비 ──
+  const SGA_ACCTS = ['급여','복리후생비','보험료','인쇄비','소모품비','접대비','임차료','통신비','차량유지비','외주비','세금과공과'];
+  const sgaMap = {};
+  // 입출금 출금 (지출결의 자동생성 제외)
+  fsFilter(ledger,'date',start,end)
+    .filter(t=>t.type==='expense' && !t.linkedExpId)
+    .forEach(t=>{ const k=SGA_ACCTS.includes(t.acct)?t.acct:'기타'; sgaMap[k]=(sgaMap[k]||0)+Number(t.amount||0); });
+  // 지출결의서 지급완료
+  fsFilter(expReqs,'draftDate',start,end)
+    .filter(t=>t.status==='지급완료')
+    .forEach(t=>{ const k=SGA_ACCTS.includes(t.acct)?t.acct:'기타'; sgaMap[k]=(sgaMap[k]||0)+Number(t.amount||0); });
+  // 법인카드 (업무용)
+  fsFilter(cards,'date',start,end)
+    .filter(t=>t.biztype!=='개인')
+    .forEach(t=>{ const k=SGA_ACCTS.includes(t.acct)?t.acct:'기타'; sgaMap[k]=(sgaMap[k]||0)+Number(t.amount||0); });
+  const totalSGA  = Object.values(sgaMap).reduce((s,v)=>s+v,0);
+  const opProfit  = grossProfit - totalSGA;
+
+  // ── 영업외손익 ──
+  const otherInc = fsFilter(ledger,'date',start,end)
+    .filter(t=>t.type==='income' && ['기타수입','이자수익'].includes(t.acct))
+    .reduce((s,t)=>s+Number(t.amount||0),0);
+  const interestExp = fsFilter(ledger,'date',start,end)
+    .filter(t=>t.type==='expense' && t.acct==='이자비용')
+    .reduce((s,t)=>s+Number(t.amount||0),0);
+  const nonOp = otherInc - interestExp;
+  const netIncome = opProfit + nonOp;
+
+  // ── 자산 (재무상태표용) ──
+  // 현금·예금: 가장 최근 ledger 잔액
+  const latestLedger = [...ledger].filter(l=>Number(l.balance)>0).sort((a,b)=>b.date.localeCompare(a.date))[0];
+  const cashBal      = latestLedger ? Number(latestLedger.balance) : 0;
+  // 매출채권: 미완료 세금계산서 매출 합계
+  const arAmt = taxInv.filter(t=>t.ditype==='매출'&&t.status!=='완료').reduce((s,t)=>s+Number(t.total||0),0);
+  // 선급금: 미완료 지출결의 승인 건
+  const prepaid = expReqs.filter(t=>t.status==='승인').reduce((s,t)=>s+Number(t.amount||0),0);
+  const totalAssets = cashBal + arAmt + prepaid;
+
+  // ── 부채 ──
+  const apAmt = taxInv.filter(t=>t.ditype==='매입'&&t.status!=='완료').reduce((s,t)=>s+Number(t.total||0),0);
+  const totalLiab = apAmt;
+
+  // ── 자본 ──
+  const paidIn = fsFilter(ledger,'date',start,end)
+    .filter(t=>t.type==='income'&&t.acct==='보통주자본금')
+    .reduce((s,t)=>s+Number(t.amount||0),0);
+  const totalEquity  = paidIn + netIncome;
+  const liabEquity   = totalLiab + totalEquity;
+  const bsBalance    = Math.round(totalAssets) === Math.round(liabEquity);
+
+  return {
+    yr, mo1, mo2, start, end, label, mg, cogsNote,
+    // P&L
+    taxSaleAmt, ledIncomeAmt, totalRev,
+    taxBuyAmt, cogs, grossProfit,
+    sgaMap, totalSGA, opProfit,
+    otherInc, interestExp, nonOp, netIncome,
+    taxSale, taxBuy, ledIncome,
+    // B/S
+    cashBal, arAmt, prepaid, totalAssets,
+    apAmt, totalLiab,
+    paidIn, totalEquity, liabEquity, bsBalance,
+  };
+}
+
+/* ══════════════════════════════
+   손익계산서 렌더링
+══════════════════════════════ */
+function renderIS(d, forPrint=false) {
+  return `<div class="fs-wrap${forPrint?' fs-page-break':''}">
+    ${fsHeader('손익계산서','Income Statement · 개인사업자 기준', d.label)}
+
+    <div class="fs-section">
+      <div class="fs-section-title">Ⅰ. 매출액</div>
+      <table class="fs-tbl"><thead><tr><th>항목</th><th>비고</th><th style="width:140px">금액(원)</th></tr></thead><tbody>
+        ${d.taxSale.map(t=>`<tr class="fs-item"><td>${t.company||'매출처'}</td><td style="font-size:11px;color:#888">세금계산서</td><td>${fmtFS(t.supply)}</td></tr>`).join('')}
+        ${d.ledIncome.map(t=>`<tr class="fs-item"><td>${t.desc}</td><td style="font-size:11px;color:#888">직접입력</td><td>${fmtFS(t.amount)}</td></tr>`).join('')}
+        <tr class="fs-subtotal"><td colspan="2"><b>매출액 합계</b></td><td>${fmtFS(d.totalRev)}</td></tr>
+      </tbody></table>
+    </div>
+
+    <div class="fs-section">
+      <div class="fs-section-title">Ⅱ. 매출원가 <small style="font-weight:400;font-size:10px">(${d.cogsNote})</small></div>
+      <table class="fs-tbl"><thead><tr><th>항목</th><th>비고</th><th style="width:140px">금액(원)</th></tr></thead><tbody>
+        ${d.taxBuy.length
+          ? d.taxBuy.map(t=>`<tr class="fs-item"><td>${t.company||'매입처'}</td><td style="font-size:11px;color:#888">세금계산서</td><td>${fmtFS(t.supply)}</td></tr>`).join('')
+          : `<tr class="fs-item"><td>추정 매출원가</td><td style="font-size:11px;color:#888">${d.cogsNote}</td><td>${fmtFS(d.cogs)}</td></tr>`}
+        <tr class="fs-subtotal"><td colspan="2"><b>매출원가 합계</b></td><td>${fmtFS(d.cogs)}</td></tr>
+      </tbody></table>
+    </div>
+
+    <div class="fs-section">
+      <table class="fs-tbl"><tbody>
+        <tr style="background:#dbeafe"><td colspan="2" style="font-weight:700">▶ 매출총이익</td><td style="font-weight:700;text-align:right">${fmtFS(d.grossProfit)}</td></tr>
+      </tbody></table>
+    </div>
+
+    <div class="fs-section">
+      <div class="fs-section-title">Ⅲ. 판매비와관리비</div>
+      <table class="fs-tbl"><thead><tr><th>계정과목</th><th>구분</th><th style="width:140px">금액(원)</th></tr></thead><tbody>
+        ${Object.entries(d.sgaMap).sort((a,b)=>b[1]-a[1]).map(([k,v])=>
+          `<tr class="fs-item"><td>${k}</td><td></td><td>${fmtFS(v)}</td></tr>`).join('')}
+        <tr class="fs-subtotal"><td colspan="2"><b>판관비 합계</b></td><td>${fmtFS(d.totalSGA)}</td></tr>
+      </tbody></table>
+    </div>
+
+    <div class="fs-section">
+      <table class="fs-tbl"><tbody>
+        <tr style="background:#dbeafe"><td colspan="2" style="font-weight:700">▶ 영업이익</td><td style="font-weight:700;text-align:right">${fmtFS(d.opProfit)}</td></tr>
+      </tbody></table>
+    </div>
+
+    <div class="fs-section">
+      <div class="fs-section-title">Ⅳ. 영업외손익</div>
+      <table class="fs-tbl"><thead><tr><th>항목</th><th>비고</th><th style="width:140px">금액(원)</th></tr></thead><tbody>
+        <tr class="fs-item"><td>영업외수익</td><td style="font-size:11px;color:#888">이자수익·기타수입</td><td>${fmtFS(d.otherInc)}</td></tr>
+        <tr class="fs-item"><td>영업외비용</td><td style="font-size:11px;color:#888">이자비용</td><td>${fmtFS(d.interestExp)}</td></tr>
+        <tr class="fs-subtotal"><td colspan="2"><b>영업외손익 합계</b></td><td>${fmtFS(d.nonOp)}</td></tr>
+      </tbody></table>
+    </div>
+
+    <div class="fs-section">
+      <table class="fs-tbl"><tbody>
+        <tr class="fs-total"><td colspan="2">★ 당기순이익</td><td style="font-size:14px">${fmtFSRaw(d.netIncome)} 원</td></tr>
+      </tbody></table>
+    </div>
+
+    <div style="margin-top:10px;padding:8px 12px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;font-size:11px;color:#6b7280">
+      본 손익계산서는 개인사업자 기준이며 법인세 비용은 포함되지 않습니다.
+      매출원가: ${d.cogsNote} | 법인카드 개인 용도 제외
+    </div>
+
+    ${!forPrint ? `<div class="fs-summary-grid no-print">
+      <div class="sc"><div class="sc-l">매출액</div><div class="sc-v inc">₩${fmt(d.totalRev)}</div></div>
+      <div class="sc"><div class="sc-l">매출총이익</div><div class="sc-v ${d.grossProfit>=0?'bal':'exp'}">₩${fmt(Math.abs(d.grossProfit))}</div></div>
+      <div class="sc"><div class="sc-l">영업이익</div><div class="sc-v ${d.opProfit>=0?'bal':'exp'}">₩${fmt(Math.abs(d.opProfit))}</div></div>
+      <div class="sc"><div class="sc-l">당기순이익</div><div class="sc-v ${d.netIncome>=0?'inc':'exp'}">₩${fmt(Math.abs(d.netIncome))}</div></div>
+    </div>` : ''}
+  </div>`;
+}
+
+/* ══════════════════════════════
+   재무상태표 렌더링
+══════════════════════════════ */
+function renderBS(d, forPrint=false) {
+  return `<div class="fs-wrap${forPrint?' fs-page-break':''}">
+    ${fsHeader('재무상태표','Balance Sheet · 개인사업자 기준', d.label)}
+
+    <div class="bs-grid">
+      <!-- 자산 -->
+      <div class="fs-section">
+        <div class="fs-section-title">자산 (Assets)</div>
+        <table class="fs-tbl"><thead><tr><th>항목</th><th style="width:120px">금액(원)</th></tr></thead><tbody>
+          <div class="fs-section-title" style="background:#4b5563;font-size:11px">유동자산</div>
+          <tr class="fs-item"><td>현금·예금 (최근 잔액)</td><td>${fmtFS(d.cashBal)}</td></tr>
+          <tr class="fs-item"><td>매출채권 (미수금)</td><td>${fmtFS(d.arAmt)}</td></tr>
+          <tr class="fs-item"><td>선급금 (승인 대기 지출)</td><td>${fmtFS(d.prepaid)}</td></tr>
+          <tr class="fs-subtotal"><td><b>자산 총계</b></td><td>${fmtFS(d.totalAssets)}</td></tr>
+        </tbody></table>
+      </div>
+
+      <!-- 부채+자본 -->
+      <div>
+        <div class="fs-section">
+          <div class="fs-section-title">부채 (Liabilities)</div>
+          <table class="fs-tbl"><thead><tr><th>항목</th><th style="width:120px">금액(원)</th></tr></thead><tbody>
+            <tr class="fs-item"><td>매입채무 (미지급금)</td><td>${fmtFS(d.apAmt)}</td></tr>
+            <tr class="fs-subtotal"><td><b>부채 총계</b></td><td>${fmtFS(d.totalLiab)}</td></tr>
+          </tbody></table>
+        </div>
+        <div class="fs-section">
+          <div class="fs-section-title">자본 (Equity)</div>
+          <table class="fs-tbl"><thead><tr><th>항목</th><th style="width:120px">금액(원)</th></tr></thead><tbody>
+            <tr class="fs-item"><td>출자금 (보통주자본금)</td><td>${fmtFS(d.paidIn)}</td></tr>
+            <tr class="fs-item"><td>당기순이익 ← 손익계산서 연동</td><td>${fmtFS(d.netIncome)}</td></tr>
+            <tr class="fs-subtotal"><td><b>자본 총계</b></td><td>${fmtFS(d.totalEquity)}</td></tr>
+          </tbody></table>
+        </div>
+        <table class="fs-tbl"><tbody>
+          <tr class="fs-subtotal"><td><b>부채·자본 총계</b></td><td>${fmtFS(d.liabEquity)}</td></tr>
+        </tbody></table>
+      </div>
+    </div>
+
+    <!-- 대차평균 검증 -->
+    <div class="${d.bsBalance?'fs-balance-badge ok':'fs-balance-badge err'}">
+      ${d.bsBalance ? '✅ 대차 균형 (자산 = 부채 + 자본)' : `❌ 대차 불일치 | 자산: ${fmtFSRaw(d.totalAssets)} / 부채+자본: ${fmtFSRaw(d.liabEquity)}`}
+    </div>
+  </div>`;
+}
+
+/* ══════════════════════════════
+   합계잔액시산표 렌더링
+══════════════════════════════ */
+function renderTB(d, forPrint=false) {
+  /* 계정과목별 차변/대변 분개
+     차변(Debit):  자산증가, 비용·매출원가 발생
+     대변(Credit): 부채증가, 자본증가, 수익 발생
+  */
+  const accounts = {};
+  const add = (acct, debit, credit) => {
+    if(!accounts[acct]) accounts[acct] = {debit:0, credit:0};
+    accounts[acct].debit  += debit;
+    accounts[acct].credit += credit;
+  };
+
+  // 매출 → 대변(수익)
+  d.taxSale.forEach(t  => add(t.acct||'매출액',       0, Number(t.supply||0)));
+  d.ledIncome.forEach(t=> add(t.acct||'매출액',       0, Number(t.amount||0)));
+  // 매출원가·매입 → 차변(비용)
+  d.taxBuy.forEach(t   => add(t.acct||'매입',  Number(t.supply||0), 0));
+  if(!d.taxBuyAmt && d.cogs) add('매출원가(추정)', d.cogs, 0);
+  // 판관비 → 차변(비용)
+  Object.entries(d.sgaMap).forEach(([k,v]) => add(k, v, 0));
+  // 영업외수익 → 대변
+  if(d.otherInc) add('영업외수익', 0, d.otherInc);
+  // 영업외비용 → 차변
+  if(d.interestExp) add('이자비용', d.interestExp, 0);
+  // 자산(현금)→차변, 자본(출자금)→대변
+  if(d.cashBal)  add('현금·예금', d.cashBal,  0);
+  if(d.paidIn)   add('보통주자본금', 0, d.paidIn);
+  // 채권·채무
+  if(d.arAmt)    add('매출채권', d.arAmt, 0);
+  if(d.apAmt)    add('매입채무', 0, d.apAmt);
+  if(d.prepaid)  add('선급금',   d.prepaid, 0);
+
+  const totalDebit  = Object.values(accounts).reduce((s,v)=>s+v.debit,0);
+  const totalCredit = Object.values(accounts).reduce((s,v)=>s+v.credit,0);
+  const tbBalance   = Math.round(totalDebit) === Math.round(totalCredit);
+  const diff        = Math.abs(totalDebit - totalCredit);
+
+  const rows = Object.entries(accounts)
+    .filter(([,v])=>v.debit||v.credit)
+    .sort((a,b)=>b[1].debit+b[1].credit - a[1].debit-a[1].credit);
+
+  return `<div class="fs-wrap${forPrint?' fs-page-break':''}">
+    ${fsHeader('합계잔액시산표','Trial Balance · 차대 균형 검증', d.label)}
+
+    <div class="fs-section">
+      <table class="fs-tbl">
+        <thead><tr>
+          <th style="width:44px;text-align:center">No.</th>
+          <th>계정과목</th>
+          <th style="width:130px">차변 합계</th>
+          <th style="width:130px">차변 잔액</th>
+          <th style="width:130px">대변 합계</th>
+          <th style="width:130px">대변 잔액</th>
+        </tr></thead>
+        <tbody>
+          ${rows.map(([acct,v],i)=>{
+            const netDebit  = v.debit  > v.credit ? v.debit - v.credit : 0;
+            const netCredit = v.credit > v.debit  ? v.credit - v.debit : 0;
+            return `<tr class="fs-item">
+              <td style="text-align:center;color:#9ca3af">${i+1}</td>
+              <td>${acct}</td>
+              <td>${fmtFS(v.debit)}</td>
+              <td>${fmtFS(netDebit)}</td>
+              <td>${fmtFS(v.credit)}</td>
+              <td>${fmtFS(netCredit)}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+        <tfoot>
+          <tr class="${tbBalance?'fs-balance-ok':'fs-balance-err'}">
+            <td colspan="2" style="text-align:center;font-weight:700">${tbBalance?'✅ 차대 균형':'❌ 차대 불일치'}</td>
+            <td>${fmtFS(totalDebit)}</td>
+            <td>-</td>
+            <td>${fmtFS(totalCredit)}</td>
+            <td>${tbBalance?'-':fmtFS(diff)+' 차이'}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+
+    <div style="margin-top:10px;padding:8px 12px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;font-size:11px;color:#6b7280">
+      ※ 차변 = 자산증가 / 비용발생 | 대변 = 부채·자본증가 / 수익발생<br>
+      차변합계 ${fmtFSRaw(totalDebit)} = 대변합계 ${fmtFSRaw(totalCredit)} → ${tbBalance?'✅ 분개 무결성 확인':'❌ 불일치 확인 필요'}
+    </div>
+  </div>`;
+}
+
+/* ── 통합 렌더 라우터 ── */
+function renderFS(prefix) {
+  const wrap = document.getElementById(`${prefix}-filter-wrap`);
+  if(wrap && !wrap.hasChildNodes()) wrap.innerHTML = makeFsFilter(prefix);
+
+  const d = calcFSData(prefix);
+  const body = document.getElementById(`${prefix}-report-body`);
+  if(!body) return;
+
+  if(prefix==='fs') body.innerHTML = renderIS(d);
+  else if(prefix==='bs') body.innerHTML = renderBS(d);
+  else if(prefix==='tb') body.innerHTML = renderTB(d);
+}
+
+/* ── 인쇄 ── */
+function printFS(mode) {
+  const prefixes = ['fs','bs','tb'];
+  // 현재 활성 페이지 찾기
+  const active = document.querySelector('.page.active');
+  const curPrefix = active ? active.id.replace('p-','').replace('-report','') : 'fs';
+
+  if(mode==='single') {
+    // 현재 장부만 인쇄
+    prefixes.forEach(p => {
+      const body = document.getElementById(`${p}-report-body`);
+      if(body) body.style.display = p===curPrefix ? '' : 'none';
+    });
+    setTimeout(()=>{ window.print(); prefixes.forEach(p=>{ const b=document.getElementById(`${p}-report-body`); if(b) b.style.display=''; }); }, 200);
+  } else {
+    // 통합 인쇄: 모든 장부 렌더 후 인쇄
+    const d = calcFSData(curPrefix);
+    const allHtml = renderIS(d,true) + renderBS(d,true) + renderTB(d,true);
+    const printWin = window.open('','_print');
+    printWin.document.write(`<!DOCTYPE html><html><head><title>재무제표 통합</title>
+      <style>
+        body{font-family:'Malgun Gothic',sans-serif;margin:0;background:#fff}
+        ${document.querySelector('style')?.textContent||''}
+      </style></head><body>${allHtml}</body></html>`);
+    printWin.document.close();
+    printWin.focus();
+    setTimeout(()=>{ printWin.print(); printWin.close(); }, 600);
+  }
+}
+
+/* 하위 호환: 기존 pl-report 페이지 접근 시 fs-report로 리다이렉트 */
+function renderPL() { renderFS('fs'); }
+function printPL()  { printFS('single'); }
+function setPLTab(tab) { setFsTab(tab,'fs'); }
+
 /* ═══════ SUMMARY ═══════ */
 function renderYear() {
   const byY={};
