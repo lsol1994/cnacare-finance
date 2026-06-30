@@ -790,6 +790,19 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
       <button class="btn" onclick="removeDupLedger()" style="margin-left:8px">🗑 중복 입출금 내역 제거</button>
     </div>
   </div>
+  <div class="card" style="margin-top:12px"><div class="ch"><span class="ct">📊 재무상태표 설정</span></div>
+    <div style="padding:14px 16px">
+      <div class="fgrid">
+        <div class="fg"><label class="fl">전기이월 이익잉여금(원)</label>
+          <input type="number" class="fc" id="sys-carry-over" placeholder="0" value="0">
+          <div class="fh">전기(이전 회계연도) 이월 이익잉여금. 재무상태표 자본에 반영됩니다.</div>
+        </div>
+      </div>
+      <button class="btn p" onclick="saveSysInfo()">✓ 저장</button>
+    </div>
+  </div>
+    </div>
+  </div>
 </div>
  
 <!-- 계정과목 설정 -->
@@ -858,8 +871,13 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
       <div class="fg"><label class="fl">금액(원) *</label><input type="number" class="fc" id="lf-amount"></div>
       <div class="fg" id="lf-balance-wrap"><label class="fl" id="lf-balance-label">잔액(원)</label><input type="number" class="fc" id="lf-balance" placeholder="잔액 입력"><div class="fh" id="lf-balance-hint" style="display:none;color:var(--O)">⚠ 지출결의서 자동등록 건입니다. 실제 잔액을 입력해주세요.</div></div>
       <div class="fg full"><label class="fl">내용/적요 *</label><input type="text" class="fc" id="lf-desc" placeholder="거래 내용"></div>
-      <div class="fg"><label class="fl">계정과목</label><select class="fc" id="lf-acct"></select></div>
+      <div class="fg"><label class="fl">계정과목</label><select class="fc" id="lf-acct" onchange="onLedgerAcctChange()"></select></div>
       <div class="fg"><label class="fl">은행계좌</label><select class="fc" id="lf-bank"></select></div>
+      <div class="fg" id="lf-partner-wrap" style="display:none">
+        <label class="fl" style="color:var(--P);font-weight:600">매출처</label>
+        <input type="text" class="fc" id="lf-partner" placeholder="예: 유바이오젠" style="border-color:var(--P)">
+        <div class="fh">매출액 계정 시 매출처를 입력하세요</div>
+      </div>
       <div class="fg full"><label class="fl">비고</label><input type="text" class="fc" id="lf-note" placeholder="메모"></div>
     </div>
     <div class="mft"><button class="btn" onclick="closeMo('mo-l-add')">취소</button><button class="btn p" onclick="saveL()">✓ 저장</button></div>
@@ -1283,6 +1301,7 @@ async function initApp() {
       if(el('sys-bizno')   && s.bizno)   el('sys-bizno').value   = s.bizno;
       if(el('sys-ceo')     && s.ceo)     el('sys-ceo').value     = s.ceo;
       if(el('sys-year')    && s.year)    el('sys-year').value     = s.year;
+      if(el('sys-carry-over') && s.carryOver) el('sys-carry-over').value = s.carryOver;
     }
  
     /* ID 카운터 최대값으로 설정 */
@@ -1599,6 +1618,13 @@ function recalcExpLedgerBalance() {
 }
 
 
+/* 매출액 계정 선택 시 매출처 입력란 표시 */
+function onLedgerAcctChange() {
+  const acct = document.getElementById('lf-acct').value;
+  const wrap = document.getElementById('lf-partner-wrap');
+  if(wrap) wrap.style.display = acct === '매출액' ? '' : 'none';
+}
+
 function openLAdd(id) {
   editLId=id||null;
   const t = id ? ledger.find(x=>x.id==id) : null;
@@ -1611,6 +1637,12 @@ function openLAdd(id) {
   syncDropdowns();
   document.getElementById('lf-acct').value = t ? t.acct : '';
   document.getElementById('lf-bank').value = t ? t.bank : '';
+
+  // 매출처 필드 복원 및 표시
+  const partnerEl = document.getElementById('lf-partner');
+  const partnerWrap = document.getElementById('lf-partner-wrap');
+  if(partnerEl) partnerEl.value = t?.partner || '';
+  if(partnerWrap) partnerWrap.style.display = (t?.acct === '매출액') ? '' : 'none';
 
   const hint  = document.getElementById('lf-balance-hint');
   const label = document.getElementById('lf-balance-label');
@@ -1677,10 +1709,13 @@ function saveL() {
         amount=parseFloat(document.getElementById('lf-amount').value)||0,
         desc=document.getElementById('lf-desc').value.trim();
   if(!date||!amount||!desc){ toast('날짜, 금액, 내용은 필수입니다.','err'); return; }
+  const acct = document.getElementById('lf-acct').value||autoClassify(desc);
+  const partner = (acct === '매출액') ? (document.getElementById('lf-partner')?.value||'') : '';
   const obj={date,type:document.getElementById('lf-iotype').value,amount,
     balance:parseFloat(document.getElementById('lf-balance').value)||0,
-    desc, acct:document.getElementById('lf-acct').value||autoClassify(desc),
+    desc, acct,
     bank:document.getElementById('lf-bank').value,
+    partner,
     note:document.getElementById('lf-note').value};
 
   const changedIds = new Set();
@@ -1772,7 +1807,7 @@ function renderL() {
     return `<tr style="${needsBal?'background:#FFF7ED':''}">
       <td class="dn">${t.date}</td>
       <td><span class="badge ${t.type==='income'?'bi':'be'}">${t.type==='income'?'입금':'출금'}</span></td>
-      <td><div style="max-width:200px;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.desc}</div>${t.note?`<div style="font-size:11px;color:var(--tm);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.note}</div>`:''}</td>
+      <td><div style="max-width:200px;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.desc}</div>${t.partner?`<div style="font-size:11px;color:var(--P);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🏢 ${t.partner}</div>`:t.note?`<div style="font-size:11px;color:var(--tm);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.note}</div>`:''}</td>
       <td class="nm exp">${t.type==='expense'?fmt(t.amount):''}</td>
       <td class="nm inc">${t.type==='income'?fmt(t.amount):''}</td>
       ${balCell}
@@ -1785,6 +1820,7 @@ function renderL() {
     const needsBal = t.linkedExpId && !Number(t.balance);
     return `<div class="txc" style="${needsBal?'border-left:3px solid var(--O);background:#FFF7ED':''}">
     <div class="txc-tp"><div class="txc-d">${t.desc}</div><div class="txc-a ${t.type==='income'?'inc':'exp'}">${t.type==='income'?'+':'-'}${fmtS(t.amount)}</div></div>
+    ${t.partner?`<div style="font-size:11px;color:var(--P);font-weight:500;margin:-3px 0 4px">🏢 ${t.partner}</div>`:''}
     <div class="txc-bt"><span class="txc-dt">${t.date}</span><span class="badge ${t.type==='income'?'bi':'be'}">${t.type==='income'?'입금':'출금'}</span>
       ${needsBal
         ? `<button class="btn sm" style="color:var(--O);border-color:var(--O);background:var(--OL);font-size:11px;padding:2px 7px" onclick="openLAdd(${t.id})">잔액 입력 ✏</button>`
@@ -3331,7 +3367,7 @@ function getDrillRows(key, start, end) {
       })
       .forEach(t => rows.push({
         date: t.date, acct: t.acct||'',
-        partner: t.bank||'', desc: t.desc||'',
+        partner: t.partner || t.bank||'', desc: t.desc||'',
         amount: Number(t.amount||0), note: t.note||''
       }));
 
@@ -3347,7 +3383,7 @@ function getDrillRows(key, start, end) {
       })
       .forEach(t => rows.push({
         date: t.date, acct: t.acct||'',
-        partner: t.bank||'', desc: t.desc||'',
+        partner: t.partner || t.bank||'', desc: t.desc||'',
         amount: Number(t.amount||0), note: t.note||''
       }));
 
@@ -3357,7 +3393,7 @@ function getDrillRows(key, start, end) {
       .filter(t => inRange(t.date) && (acct==='ALL' || t.acct===acct))
       .forEach(t => rows.push({
         date: t.date, acct: t.acct||'',
-        partner: t.bank||'', desc: t.desc||'',
+        partner: t.partner || t.bank||'', desc: t.desc||'',
         amount: Number(t.amount||0), note: t.note||''
       }));
 
@@ -3370,6 +3406,15 @@ function getDrillRows(key, start, end) {
           date: t.payDate||t.draftDate, acct: '외상매출금',
           partner: t.client||t.payee||'', desc: `${t.title} (간병 ${t.careDays||0}일)`,
           amount: Number(t.expectedRev||0), note: `급여 ${Number(t.amount).toLocaleString()}원 + 수수료 ${((t.careDays||0)*5000).toLocaleString()}원`
+        }));
+    } else if(acct === 'unpaid') {
+      // 미지급금: 대기 상태 지출결의서
+      expReqs
+        .filter(t => t.status==='대기')
+        .forEach(t => rows.push({
+          date: t.payDate||t.draftDate, acct: t.acct||'',
+          partner: t.payee||'', desc: t.title||'',
+          amount: Number(t.amount||0), note: '대기(미지급)'
         }));
     } else {
       // 선급금: 승인 대기
@@ -3612,42 +3657,82 @@ function calcFSData(prefix) {
   const nonOp    = otherInc - interestExp;
   const netIncome = opProfit + nonOp;
 
-  // ── 재무상태표 ──
-  // 현금·예금: 기간 내 매출액 + 기타수입 + 이자수익 합계
-  const ASSET_INCOME = [...CAPITAL_ACCTS]; // 출자금은 자본 항목이므로 제외
-  const cashBal = ledPeriod
-    .filter(t => t.type === 'income' && !ASSET_INCOME.includes(t.acct))
-    .reduce((s,t) => s + Number(t.amount||0), 0);
+  // ══════════════════════════════════════
+  // 재무상태표 (손익계산서와 독립 계산)
+  // ══════════════════════════════════════
 
-  // 매출채권 = 세금계산서 미완료 매출 + 급여 지출결의서의 외상매출금 합계
-  const arTax = taxInv
-    .filter(t => t.ditype==='매출' && t.status!=='완료')
-    .reduce((s,t) => s+Number(t.total||0), 0);
-  const arWage = expReqs
+  // ── 자산 ──
+  // ① 외상매출금: 급여 지출결의서에 입력한 예상매출액 (미수금)
+  const bsArWage = expReqs
     .filter(t => t.acct==='급여' && Number(t.expectedRev||0) > 0)
     .reduce((s,t) => s+Number(t.expectedRev||0), 0);
-  const arAmt = arTax + arWage;
 
-  // 선급금: 승인 상태 지출결의서
-  const prepaid = expReqs
+  // ② 선급금: 승인 상태(미지급) 지출결의서
+  const bsPrepaid = expReqs
     .filter(t => t.status==='승인')
     .reduce((s,t) => s+Number(t.amount||0), 0);
 
-  const totalAssets = cashBal + arAmt + prepaid;
+  // ③ 현금·예금: 입출금 내역의 가장 최신 잔액
+  const latestLedger = [...ledger]
+    .filter(l => Number(l.balance) > 0)
+    .sort((a,b) => b.date.localeCompare(a.date))[0];
+  const bsCash = latestLedger ? Number(latestLedger.balance) : 0;
 
-  // 매입채무: 미완료 세금계산서 매입
-  const apAmt = taxInv
+  // ④ 미수수익: 세금계산서 미완료 매출 (청구했으나 미수령)
+  const bsArTax = taxInv
+    .filter(t => t.ditype==='매출' && t.status!=='완료')
+    .reduce((s,t) => s+Number(t.total||0), 0);
+
+  const totalAssets = bsArWage + bsPrepaid + bsCash + bsArTax;
+
+  // ── 부채 ──
+  // ① 단기차입금: 계정과목이 '단기차입금'인 입금 내역 (갚아야 할 금액)
+  const bsShortLoan = ledger
+    .filter(t => t.type==='income' && t.acct==='단기차입금')
+    .reduce((s,t) => s+Number(t.amount||0), 0);
+
+  // ② 미지급금: 지급완료 상태지만 미지급된 지출결의서 (지급완료 중 실제 미처리)
+  //    → 승인 상태 지출결의서 중 선급금 외 일반 비용
+  const bsUnpaid = expReqs
+    .filter(t => t.status==='대기')
+    .reduce((s,t) => s+Number(t.amount||0), 0);
+
+  // ③ 외상매입금: 세금계산서 미완료 매입
+  const bsApTax = taxInv
     .filter(t => t.ditype==='매입' && t.status!=='완료')
     .reduce((s,t) => s+Number(t.total||0), 0);
-  const totalLiab = apAmt;
 
-  // 자본: 출자금(입출금 기준) + 당기순이익
-  const paidIn = ledPeriod
-    .filter(t => t.type==='income' && CAPITAL_ACCTS.includes(t.acct))
+  const totalLiab = bsShortLoan + bsUnpaid + bsApTax;
+
+  // ── 자본 ──
+  // ① 자본금: 보통주자본금 전체 (기간 무관 누적)
+  const bsCapital = ledger
+    .filter(t => t.type==='income' && t.acct==='보통주자본금')
     .reduce((s,t) => s+Number(t.amount||0), 0);
-  const totalEquity = paidIn + netIncome;
-  const liabEquity  = totalLiab + totalEquity;
-  const bsBalance   = Math.round(totalAssets) === Math.round(liabEquity);
+
+  // ② 이익잉여금: 당기순이익 (전기이월은 설정에서 수동 입력)
+  const bsRetained = netIncome;
+
+  // 전기이월 이익잉여금 (시스템 설정에 저장된 값)
+  let bsCarryOver = 0;
+  try {
+    const sysEl = document.getElementById('sys-carry-over');
+    if(sysEl) bsCarryOver = parseFloat(sysEl.value)||0;
+  } catch(e){}
+
+  const totalEquity  = bsCapital + bsRetained + bsCarryOver;
+  const liabEquity   = totalLiab + totalEquity;
+  const bsBalance    = Math.round(totalAssets) === Math.round(liabEquity);
+
+  // 이전 변수명 호환 (하위 참조용)
+  const arAmt = bsArWage + bsArTax;
+  const arTax = bsArTax;
+  const arWage = bsArWage;
+  const prepaid = bsPrepaid;
+  const cashBal = bsCash;
+  const paidIn  = bsCapital;
+  const apAmt   = bsApTax;
+  const totalLiabCompat = totalLiab;
 
   return {
     yr, mo1, mo2, start, end, label, cogsNote,
@@ -3663,6 +3748,10 @@ function calcFSData(prefix) {
     cashBal, arAmt, arTax, arWage, prepaid, totalAssets,
     apAmt, totalLiab,
     paidIn, totalEquity, liabEquity, bsBalance,
+    // 재무상태표 세부항목
+    bsArWage, bsPrepaid, bsCash, bsArTax,
+    bsShortLoan, bsUnpaid, bsApTax,
+    bsCapital, bsRetained, bsCarryOver,
   };
 }
 
@@ -3760,53 +3849,135 @@ function renderIS(d, forPrint=false) {
 ══════════════════════════════ */
 function renderBS(d, forPrint=false) {
   const D = (key, label, val) => forPrint ? fmtFS(val) : fmtFS(val, key, label);
+  const hint = forPrint ? '' : '<span style="font-size:10px;color:#9ca3af;font-weight:400">클릭→상세</span>';
+
   return `<div class="fs-wrap${forPrint?' fs-page-break':''}">
     ${fsHeader('재무상태표','Balance Sheet · 개인사업자 기준', d.label)}
 
     <div class="bs-grid">
-      <!-- 자산 -->
+
+      <!-- ── 자산 ── -->
       <div class="fs-section">
-        <div class="fs-section-title">자산 (Assets)</div>
-        <table class="fs-tbl"><thead><tr><th>항목</th><th style="width:140px">금액(원) ${forPrint?'':'<span style="font-size:10px;color:#9ca3af;font-weight:400">클릭→상세</span>'}</th></tr></thead><tbody>
-          <tr class="fs-item"><td>현금·예금 (매출+기타수입+이자수익)</td><td>${D('ledger_income:ALL','매출액·기타수입·이자수익',d.cashBal)}</td></tr>
-          <tr class="fs-item"><td>현금·예금 (매출+기타수입+이자수익)</td><td>${D('ledger_income:ALL','매출액·기타수입·이자수익',d.cashBal)}</td></tr>
-          ${d.arTax ? `<tr class="fs-item"><td>매출채권 (세금계산서 미수금)</td><td>${D('taxSale:ALL','세금계산서 미완료 매출',d.arTax)}</td></tr>` : ''}
-          ${d.arWage ? `<tr class="fs-item" style="background:var(--PU)"><td>💡 외상매출금 (급여 연동 미수금)</td><td>${fmtFS(d.arWage,'expReq:wage','급여 지출결의서 외상매출금')}</td></tr>` : ''}
-          ${(!d.arTax && !d.arWage) ? `<tr class="fs-item" style="color:var(--tm)"><td>매출채권 (없음)</td><td>${fmtFS(0)}</td></tr>` : ''}
-          <tr class="fs-item"><td>선급금 (승인 대기 지출)</td><td>${D('expReq:ALL','지출결의서(승인대기)',d.prepaid)}</td></tr>
-          <tr class="fs-subtotal"><td><b>자산 총계</b></td><td>${fmtFS(d.totalAssets)}</td></tr>
-        </tbody></table>
+        <div class="fs-section-title">자산 (Assets) ${hint}</div>
+        <table class="fs-tbl">
+          <thead><tr><th>항목</th><th>내용</th><th style="width:130px">금액(원)</th></tr></thead>
+          <tbody>
+            <!-- 유동자산 -->
+            <tr><td colspan="3" style="background:#f3f4f6;font-size:11px;font-weight:600;color:#6b7280;padding:4px 10px">유동자산</td></tr>
+
+            <tr class="fs-item">
+              <td>외상매출금</td>
+              <td style="font-size:11px;color:#888">급여 지출결의서 예상매출액 합계</td>
+              <td>${d.bsArWage ? D('expReq:wage','외상매출금(급여연동)',d.bsArWage) : fmtFS(0)}</td>
+            </tr>
+
+            <tr class="fs-item">
+              <td>선급금</td>
+              <td style="font-size:11px;color:#888">승인 대기 중인 지출결의서</td>
+              <td>${D('expReq:ALL','선급금(승인대기)',d.bsPrepaid)}</td>
+            </tr>
+
+            <tr class="fs-item">
+              <td>현금·예금</td>
+              <td style="font-size:11px;color:#888">입출금 내역 최신 잔액</td>
+              <td>${D('ledger:ALL','현금·예금 잔액',d.bsCash)}</td>
+            </tr>
+
+            <tr class="fs-item">
+              <td>미수수익</td>
+              <td style="font-size:11px;color:#888">세금계산서 미완료 매출</td>
+              <td>${d.bsArTax ? D('taxSale:ALL','미수수익(세금계산서)',d.bsArTax) : fmtFS(0)}</td>
+            </tr>
+
+            <tr class="fs-subtotal">
+              <td colspan="2"><b>자산 총계</b></td>
+              <td>${fmtFS(d.totalAssets)}</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
-      <!-- 부채+자본 -->
+      <!-- ── 부채 + 자본 ── -->
       <div>
+        <!-- 부채 -->
         <div class="fs-section">
-          <div class="fs-section-title">부채 (Liabilities)</div>
-          <table class="fs-tbl"><thead><tr><th>항목</th><th style="width:140px">금액(원)</th></tr></thead><tbody>
-            <tr class="fs-item"><td>매입채무 (미지급금)</td><td>${D('taxBuy:ALL','세금계산서 매입(미지급)',d.apAmt)}</td></tr>
-            <tr class="fs-subtotal"><td><b>부채 총계</b></td><td>${fmtFS(d.totalLiab)}</td></tr>
-          </tbody></table>
+          <div class="fs-section-title">부채 (Liabilities) ${hint}</div>
+          <table class="fs-tbl">
+            <thead><tr><th>항목</th><th>내용</th><th style="width:130px">금액(원)</th></tr></thead>
+            <tbody>
+              <tr class="fs-item">
+                <td>단기차입금</td>
+                <td style="font-size:11px;color:#888">계정과목 '단기차입금' 입금 합계</td>
+                <td>${D('ledger_income:단기차입금','단기차입금',d.bsShortLoan)}</td>
+              </tr>
+              <tr class="fs-item">
+                <td>미지급금</td>
+                <td style="font-size:11px;color:#888">대기 상태 지출결의서</td>
+                <td>${D('expReq:unpaid','미지급금(대기 지출결의서)',d.bsUnpaid)}</td>
+              </tr>
+              <tr class="fs-item">
+                <td>외상매입금</td>
+                <td style="font-size:11px;color:#888">세금계산서 미완료 매입</td>
+                <td>${d.bsApTax ? D('taxBuy:ALL','외상매입금(세금계산서)',d.bsApTax) : fmtFS(0)}</td>
+              </tr>
+              <tr class="fs-subtotal">
+                <td colspan="2"><b>부채 총계</b></td>
+                <td>${fmtFS(d.totalLiab)}</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
+
+        <!-- 자본 -->
         <div class="fs-section">
-          <div class="fs-section-title">자본 (Equity)</div>
-          <table class="fs-tbl"><thead><tr><th>항목</th><th style="width:140px">금액(원)</th></tr></thead><tbody>
-            <tr class="fs-item"><td>출자금 (보통주자본금)</td><td>${D('ledger_income:보통주자본금','출자금',d.paidIn)}</td></tr>
-            <tr class="fs-item"><td>당기순이익 ← 손익계산서 연동</td><td>${fmtFS(d.netIncome)}</td></tr>
-            <tr class="fs-subtotal"><td><b>자본 총계</b></td><td>${fmtFS(d.totalEquity)}</td></tr>
-          </tbody></table>
+          <div class="fs-section-title">자본 (Equity) ${hint}</div>
+          <table class="fs-tbl">
+            <thead><tr><th>항목</th><th>내용</th><th style="width:130px">금액(원)</th></tr></thead>
+            <tbody>
+              <tr class="fs-item">
+                <td>자본금</td>
+                <td style="font-size:11px;color:#888">보통주자본금 입금 누계</td>
+                <td>${D('ledger_income:보통주자본금','자본금',d.bsCapital)}</td>
+              </tr>
+              <tr class="fs-item">
+                <td>이익잉여금</td>
+                <td style="font-size:11px;color:#888">당기순이익 ← 손익계산서</td>
+                <td>${fmtFS(d.bsRetained)}</td>
+              </tr>
+              ${d.bsCarryOver ? `
+              <tr class="fs-item">
+                <td>전기이월 이익잉여금</td>
+                <td style="font-size:11px;color:#888">시스템 설정 입력값</td>
+                <td>${fmtFS(d.bsCarryOver)}</td>
+              </tr>` : ''}
+              <tr class="fs-subtotal">
+                <td colspan="2"><b>자본 총계</b></td>
+                <td>${fmtFS(d.totalEquity)}</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
-        <table class="fs-tbl"><tbody>
-          <tr class="fs-subtotal"><td><b>부채·자본 총계</b></td><td>${fmtFS(d.liabEquity)}</td></tr>
-        </tbody></table>
+
+        <table class="fs-tbl">
+          <tbody>
+            <tr class="fs-subtotal">
+              <td colspan="2"><b>부채·자본 총계</b></td>
+              <td>${fmtFS(d.liabEquity)}</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
 
     <!-- 대차평균 검증 -->
-    <div class="${d.bsBalance?'fs-balance-badge ok':'fs-balance-badge err'}">
-      ${d.bsBalance ? '✅ 대차 균형 (자산 = 부채 + 자본)' : `❌ 대차 불일치 | 자산: ${fmtFSRaw(d.totalAssets)} / 부채+자본: ${fmtFSRaw(d.liabEquity)}`}
+    <div class="${d.bsBalance?'fs-balance-badge ok':'fs-balance-badge err'}" style="margin-top:12px">
+      ${d.bsBalance
+        ? '✅ 대차 균형 (자산 총계 = 부채 + 자본)'
+        : `❌ 대차 불일치 | 자산: ${fmtFSRaw(d.totalAssets)} / 부채+자본: ${fmtFSRaw(d.liabEquity)} | 차액: ${fmtFSRaw(Math.abs(d.totalAssets-d.liabEquity))}`}
     </div>
   </div>`;
 }
+
 
 /* ══════════════════════════════
    합계잔액시산표 렌더링
@@ -4307,6 +4478,7 @@ function saveSysInfo() {
     bizno:   get('sys-bizno'),
     ceo:     get('sys-ceo'),
     year:    get('sys-year'),
+    carryOver: parseFloat(document.getElementById('sys-carry-over')?.value)||0,
   };
   fsSet(COL.settings, 'sysInfo', sysInfo);
   // 대시보드 연도 선택도 시스템 설정 연도에 맞게 동기화
