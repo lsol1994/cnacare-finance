@@ -3127,6 +3127,16 @@ function setFsTab(tab, prefix) {
   renderFS(prefix);
 }
 
+/* ── 섹션 접기/펴기 ── */
+function toggleFsSection(id) {
+  const body = document.getElementById(id+'-body');
+  const icon = document.getElementById(id+'-icon');
+  if(!body) return;
+  const collapsed = body.style.display === 'none';
+  body.style.display = collapsed ? '' : 'none';
+  if(icon) icon.textContent = collapsed ? '▲ 접기' : '▼ 펼치기';
+}
+
 /* ── 금액 포맷 (드릴다운 클릭 지원) ── */
 function fmtFS(v, drillKey='', drillLabel='') {
   if(v===null||v===undefined) return '<span class="fs-zero">-</span>';
@@ -3473,12 +3483,18 @@ function renderIS(d, forPrint=false) {
     ${fsHeader('손익계산서','Income Statement · 개인사업자 기준', d.label)}
 
     <div class="fs-section">
-      <div class="fs-section-title">Ⅰ. 매출액</div>
+      <div class="fs-section-title" style="cursor:pointer;user-select:none;display:flex;justify-content:space-between;align-items:center"
+        onclick="toggleFsSection('is-rev')">
+        <span>Ⅰ. 매출액</span>
+        <span id="is-rev-icon" style="font-size:11px;color:#9ca3af">▲ 접기</span>
+      </div>
+      <div id="is-rev-body">
       <table class="fs-tbl"><thead><tr><th>항목</th><th>비고</th><th style="width:160px">금액(원) ${forPrint?'':'<span style="font-size:10px;color:#9ca3af;font-weight:400">클릭 시 상세</span>'}</th></tr></thead><tbody>
         ${d.taxSale.map(t=>`<tr class="fs-item"><td>${t.company||'매출처'}</td><td style="font-size:11px;color:#888">세금계산서</td><td>${D('taxSale:매출액','세금계산서 매출',t.supply)}</td></tr>`).join('')}
         ${d.ledIncome.map(t=>`<tr class="fs-item"><td>${t.desc}</td><td style="font-size:11px;color:#888">직접입력</td><td>${D(`ledger_income:${t.acct||'매출액'}`,t.acct||'매출액',t.amount)}</td></tr>`).join('')}
         <tr class="fs-subtotal"><td colspan="2"><b>매출액 합계</b></td><td>${D('taxSale:ALL','매출액 전체',d.totalRev)}</td></tr>
       </tbody></table>
+      </div>
     </div>
 
     <div class="fs-section">
