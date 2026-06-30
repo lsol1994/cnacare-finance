@@ -264,8 +264,9 @@ tbody tr:hover td{background:var(--PU)}
 .fs-balance-badge{display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:20px;font-size:12.5px;font-weight:700;margin-top:10px}
 .fs-balance-badge.ok{background:#d1fae5;color:#065f46}
 .fs-balance-badge.err{background:#fee2e2;color:#991b1b}
-/* 좌우 2단 레이아웃 (재무상태표) */
-.bs-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+/* 드릴다운 클릭 셀 */
+.fs-drill{cursor:pointer;text-decoration:underline;text-underline-offset:2px;text-decoration-style:dotted}
+.fs-drill:hover{text-decoration-style:solid;opacity:.8}
 @media(max-width:860px){.bs-grid{grid-template-columns:1fr}.fs-summary-grid{grid-template-columns:1fr 1fr}}
 
 /* Period filter btn */
@@ -724,7 +725,51 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
 </div>
 
 
-<!-- 시스템 설정 -->
+<!-- 재무제표 드릴다운 상세 모달 -->
+<div class="mo" id="mo-fs-drill">
+  <div class="mbox" style="max-width:780px;max-height:88vh;display:flex;flex-direction:column">
+    <div class="mhandle"></div>
+    <div class="mh">
+      <div>
+        <div class="mt" id="drill-title">상세 내역</div>
+        <div id="drill-subtitle" style="font-size:11.5px;color:var(--t3);margin-top:2px"></div>
+      </div>
+      <button class="mc" onclick="closeMo('mo-fs-drill')">✕</button>
+    </div>
+    <!-- 경고 (불일치 시) -->
+    <div id="drill-warn" style="display:none;padding:8px 14px;background:#fee2e2;color:#991b1b;font-size:12px;border-bottom:1px solid #fca5a5">
+      ※ 주의: 원천 데이터와 합계 금액에 일치하지 않는 전표가 있습니다.
+    </div>
+    <!-- 로딩 -->
+    <div id="drill-loading" style="padding:40px;text-align:center;color:var(--t3)">
+      <div style="width:32px;height:32px;border:3px solid var(--bd);border-top-color:var(--P);border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 12px"></div>
+      데이터를 불러오는 중...
+    </div>
+    <!-- 테이블 -->
+    <div id="drill-body" style="display:none;overflow-y:auto;flex:1">
+      <div class="tw" style="max-height:56vh;overflow-y:auto">
+        <table>
+          <thead><tr>
+            <th style="width:36px;text-align:center">No.</th>
+            <th style="width:88px">거래일자</th>
+            <th style="width:110px">계정과목</th>
+            <th>거래처/사용처</th>
+            <th>적요/내용</th>
+            <th style="width:110px;text-align:right">금액(원)</th>
+            <th style="width:80px">비고</th>
+          </tr></thead>
+          <tbody id="drill-tbody"></tbody>
+          <tfoot id="drill-tfoot"></tfoot>
+        </table>
+      </div>
+    </div>
+    <div class="mft" id="drill-footer" style="display:none">
+      <button class="btn" onclick="closeMo('mo-fs-drill')">닫기</button>
+      <button class="btn" onclick="drillExportCSV()">CSV 다운로드</button>
+      <button class="btn p" onclick="drillPrint()">🖨 인쇄</button>
+    </div>
+  </div>
+</div>
 <div id="p-set-system" class="page">
   <div class="ph"><div><div class="ph-t">시스템 설정</div><div class="ph-s">회사 정보 및 기본 설정</div></div></div>
   <div class="card"><div class="ch"><span class="ct">회사 정보</span></div>
@@ -3082,19 +3127,209 @@ function setFsTab(tab, prefix) {
   renderFS(prefix);
 }
 
-/* ── 금액 포맷 ── */
-function fmtFS(v) {
+/* ── 금액 포맷 (드릴다운 클릭 지원) ── */
+function fmtFS(v, drillKey='', drillLabel='') {
   if(v===null||v===undefined) return '<span class="fs-zero">-</span>';
   const n = Math.round(v);
   if(n===0) return '<span class="fs-zero">-</span>';
   const abs = Math.abs(n).toLocaleString('ko-KR');
-  return n<0 ? `<span class="fs-neg">(${abs})</span>` : abs;
+  const val = n<0 ? `<span class="fs-neg">(${abs})</span>` : abs;
+  if(!drillKey) return val;
+  // 드릴다운 링크
+  const esc = drillKey.replace(/'/g,"\\'").replace(/"/g,'&quot;');
+  const lbl = drillLabel.replace(/'/g,"\\'").replace(/"/g,'&quot;');
+  return `<span class="fs-drill" onclick="openDrill('${esc}','${lbl}',${n})">${val}</span>`;
 }
 function fmtFSRaw(v) {
   if(!v) return '-';
   const n = Math.round(v), abs = Math.abs(n).toLocaleString('ko-KR');
   return n<0 ? `(${abs})` : abs;
 }
+
+/* ══════════════════════════════
+   드릴다운 (Drill-down) 시스템
+══════════════════════════════ */
+
+let _drillData = []; // 현재 모달 데이터 (CSV/인쇄용)
+
+/* 드릴다운 키 → 원천 데이터 조회
+   key 형식: "소스:계정과목"  예) "taxSale:매출액", "ledger:급여", "card:소모품비"
+*/
+function getDrillRows(key, start, end) {
+  const [src, acct] = key.split(':');
+  const rows = [];
+
+  const inRange = d => d >= start && d <= end;
+
+  if(src === 'taxSale') {
+    taxInv.filter(t => t.ditype==='매출' && inRange((t.date||'').slice(0,10)))
+      .forEach(t => rows.push({
+        date: t.date, acct: t.acct||'매출액',
+        partner: t.company||'', desc: `${t.kind||''} (공급가)`,
+        amount: Number(t.supply||0), note: t.appno||''
+      }));
+  } else if(src === 'taxBuy') {
+    taxInv.filter(t => t.ditype==='매입' && inRange((t.date||'').slice(0,10)))
+      .forEach(t => rows.push({
+        date: t.date, acct: t.acct||'매입원가',
+        partner: t.company||'', desc: `${t.kind||''} (공급가)`,
+        amount: Number(t.supply||0), note: t.appno||''
+      }));
+  } else if(src === 'ledger') {
+    ledger.filter(t => inRange(t.date) && (acct==='ALL' || t.acct===acct))
+      .forEach(t => rows.push({
+        date: t.date, acct: t.acct||'',
+        partner: t.bank||'', desc: t.desc||'',
+        amount: Number(t.amount||0), note: t.note||''
+      }));
+  } else if(src === 'ledger_income') {
+    ledger.filter(t => t.type==='income' && inRange(t.date) && (acct==='ALL' || t.acct===acct))
+      .forEach(t => rows.push({
+        date: t.date, acct: t.acct||'',
+        partner: t.bank||'', desc: t.desc||'',
+        amount: Number(t.amount||0), note: t.note||''
+      }));
+  } else if(src === 'ledger_exp') {
+    ledger.filter(t => t.type==='expense' && inRange(t.date) && !t.linkedExpId && (acct==='ALL' || t.acct===acct))
+      .forEach(t => rows.push({
+        date: t.date, acct: t.acct||'',
+        partner: t.bank||'', desc: t.desc||'',
+        amount: Number(t.amount||0), note: t.note||''
+      }));
+  } else if(src === 'card') {
+    cards.filter(t => t.biztype!=='개인' && inRange(t.date) && (acct==='ALL' || t.acct===acct))
+      .forEach(t => rows.push({
+        date: t.date, acct: t.acct||'',
+        partner: t.merchant||'', desc: t.item||t.merchant||'',
+        amount: Number(t.amount||0), note: t.card||''
+      }));
+  } else if(src === 'expReq') {
+    expReqs.filter(t => t.status==='지급완료' && inRange(t.draftDate||'') && (acct==='ALL' || t.acct===acct))
+      .forEach(t => rows.push({
+        date: t.payDate||t.draftDate, acct: t.acct||'',
+        partner: t.payee||'', desc: t.title||'',
+        amount: Number(t.amount||0), note: t.method||''
+      }));
+  }
+
+  return rows.sort((a,b) => a.date.localeCompare(b.date));
+}
+
+function openDrill(key, label, expectedTotal) {
+  // 현재 활성 재무제표 페이지의 기간 파악
+  const active = document.querySelector('.page.active');
+  const prefix = active ? active.id.replace('p-','').replace('-report','') : 'fs';
+  const yr   = document.getElementById(`${prefix}-year`)?.value || '2026';
+  const from = document.getElementById(`${prefix}-from`)?.value || '01';
+  const to   = document.getElementById(`${prefix}-to`)?.value   || '12';
+  const start = `${yr}-${from}-01`;
+  const end   = `${yr}-${to}-31`;
+  const period = `${yr}년 ${parseInt(from)}월 ~ ${parseInt(to)}월`;
+
+  // 모달 열기 + 로딩
+  document.getElementById('drill-title').textContent    = label;
+  document.getElementById('drill-subtitle').textContent = `조회기간: ${period}`;
+  document.getElementById('drill-warn').style.display   = 'none';
+  document.getElementById('drill-loading').style.display = '';
+  document.getElementById('drill-body').style.display    = 'none';
+  document.getElementById('drill-footer').style.display  = 'none';
+  openMo('mo-fs-drill');
+
+  // 비동기 렌더 (로딩 애니메이션이 보이도록 setTimeout)
+  setTimeout(() => {
+    const rows = getDrillRows(key, start, end);
+    _drillData = rows;
+    _drillData._label  = label;
+    _drillData._period = period;
+
+    const total = rows.reduce((s,r) => s+r.amount, 0);
+    const mismatch = expectedTotal && Math.round(total) !== Math.round(Math.abs(expectedTotal));
+
+    // 경고
+    document.getElementById('drill-warn').style.display = mismatch ? '' : 'none';
+
+    // 테이블 렌더
+    const tbody = document.getElementById('drill-tbody');
+    if(!rows.length) {
+      tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--tm)">해당 기간 내 데이터가 없습니다</td></tr>`;
+    } else {
+      tbody.innerHTML = rows.map((r,i) => `<tr>
+        <td style="text-align:center;font-size:11px;color:var(--t3)">${i+1}</td>
+        <td class="dn">${r.date}</td>
+        <td><span class="at ${acctColor(r.acct)}">${r.acct||'-'}</span></td>
+        <td style="font-size:12px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.partner||'-'}</td>
+        <td style="font-size:12px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.desc||'-'}</td>
+        <td class="nm" style="font-family:'JetBrains Mono',monospace;font-size:12.5px">${r.amount.toLocaleString('ko-KR')}</td>
+        <td style="font-size:11px;color:var(--t3)">${r.note||''}</td>
+      </tr>`).join('');
+    }
+
+    // 합계 행
+    document.getElementById('drill-tfoot').innerHTML = `
+      <tr style="background:var(--sf2);font-weight:700">
+        <td colspan="5" style="text-align:right;padding:8px 10px">합계</td>
+        <td class="nm" style="font-family:'JetBrains Mono',monospace;padding:8px 10px;${mismatch?'color:var(--R)':''}">${total.toLocaleString('ko-KR')}</td>
+        <td style="font-size:11px;color:${mismatch?'var(--R)':'var(--G)'}">${mismatch?'⚠ 불일치':'✓'}</td>
+      </tr>`;
+
+    document.getElementById('drill-loading').style.display = 'none';
+    document.getElementById('drill-body').style.display    = '';
+    document.getElementById('drill-footer').style.display  = '';
+  }, 120);
+}
+
+/* CSV 다운로드 */
+function drillExportCSV() {
+  if(!_drillData.length) return;
+  const hdr = ['No.','거래일자','계정과목','거래처/사용처','적요/내용','금액(원)','비고'];
+  const lines = [
+    hdr.join(','),
+    ..._drillData.map((r,i) =>
+      [i+1, r.date, r.acct, `"${r.partner}"`, `"${r.desc}"`, r.amount, r.note||''].join(',')
+    )
+  ];
+  dlBlob('\uFEFF'+lines.join('\n'), 'text/csv',
+    `${_drillData._label||'상세내역'}_${_drillData._period||''}.csv`);
+  toast('CSV 다운로드', 'ok');
+}
+
+/* 인쇄 */
+function drillPrint() {
+  if(!_drillData.length) return;
+  const si = getSysInfo();
+  const rows = _drillData.map((r,i) => `
+    <tr>
+      <td>${i+1}</td><td>${r.date}</td><td>${r.acct}</td>
+      <td>${r.partner}</td><td>${r.desc}</td>
+      <td style="text-align:right">${r.amount.toLocaleString('ko-KR')}</td>
+      <td>${r.note||''}</td>
+    </tr>`).join('');
+  const total = _drillData.reduce((s,r)=>s+r.amount,0);
+  const w = window.open('','_print');
+  w.document.write(`<!DOCTYPE html><html><head><title>${_drillData._label}</title>
+  <style>
+    body{font-family:'Malgun Gothic',sans-serif;padding:20mm;font-size:10pt}
+    h2{font-size:14pt;margin-bottom:4px}
+    p{color:#666;font-size:9pt;margin:0 0 12px}
+    table{width:100%;border-collapse:collapse;font-size:9pt}
+    th,td{border:1px solid #999;padding:4px 7px}
+    th{background:#f0f0f0;font-weight:600}
+    tfoot td{font-weight:700;background:#f8f8f8}
+    td:nth-child(6),th:nth-child(6){text-align:right}
+    @page{size:A4 landscape;margin:10mm}
+  </style></head><body>
+  <h2>${_drillData._label} 상세 내역</h2>
+  <p>${si.company} | 대표 ${si.ceo} | 조회기간: ${_drillData._period}</p>
+  <table>
+    <thead><tr><th>No.</th><th>거래일자</th><th>계정과목</th><th>거래처/사용처</th><th>적요/내용</th><th>금액(원)</th><th>비고</th></tr></thead>
+    <tbody>${rows}</tbody>
+    <tfoot><tr><td colspan="5" style="text-align:right">합계</td><td>${total.toLocaleString('ko-KR')}</td><td></td></tr></tfoot>
+  </table>
+  </body></html>`);
+  w.document.close(); w.focus();
+  setTimeout(()=>{ w.print(); w.close(); }, 400);
+}
+
 
 /* ── 기간 필터 ── */
 function fsFilter(arr, dateField, start, end) {
@@ -3231,25 +3466,28 @@ function calcFSData(prefix) {
    손익계산서 렌더링
 ══════════════════════════════ */
 function renderIS(d, forPrint=false) {
+  const dk = forPrint ? '' : 'd'; // 인쇄 시 드릴다운 비활성
+  const D = (key, label, val) => forPrint ? fmtFS(val) : fmtFS(val, key, label);
+
   return `<div class="fs-wrap${forPrint?' fs-page-break':''}">
     ${fsHeader('손익계산서','Income Statement · 개인사업자 기준', d.label)}
 
     <div class="fs-section">
       <div class="fs-section-title">Ⅰ. 매출액</div>
-      <table class="fs-tbl"><thead><tr><th>항목</th><th>비고</th><th style="width:140px">금액(원)</th></tr></thead><tbody>
-        ${d.taxSale.map(t=>`<tr class="fs-item"><td>${t.company||'매출처'}</td><td style="font-size:11px;color:#888">세금계산서</td><td>${fmtFS(t.supply)}</td></tr>`).join('')}
-        ${d.ledIncome.map(t=>`<tr class="fs-item"><td>${t.desc}</td><td style="font-size:11px;color:#888">직접입력</td><td>${fmtFS(t.amount)}</td></tr>`).join('')}
-        <tr class="fs-subtotal"><td colspan="2"><b>매출액 합계</b></td><td>${fmtFS(d.totalRev)}</td></tr>
+      <table class="fs-tbl"><thead><tr><th>항목</th><th>비고</th><th style="width:160px">금액(원) ${forPrint?'':'<span style="font-size:10px;color:#9ca3af;font-weight:400">클릭 시 상세</span>'}</th></tr></thead><tbody>
+        ${d.taxSale.map(t=>`<tr class="fs-item"><td>${t.company||'매출처'}</td><td style="font-size:11px;color:#888">세금계산서</td><td>${D('taxSale:매출액','세금계산서 매출',t.supply)}</td></tr>`).join('')}
+        ${d.ledIncome.map(t=>`<tr class="fs-item"><td>${t.desc}</td><td style="font-size:11px;color:#888">직접입력</td><td>${D(`ledger_income:${t.acct||'매출액'}`,t.acct||'매출액',t.amount)}</td></tr>`).join('')}
+        <tr class="fs-subtotal"><td colspan="2"><b>매출액 합계</b></td><td>${D('taxSale:ALL','매출액 전체',d.totalRev)}</td></tr>
       </tbody></table>
     </div>
 
     <div class="fs-section">
       <div class="fs-section-title">Ⅱ. 매출원가 <small style="font-weight:400;font-size:10px">(${d.cogsNote})</small></div>
-      <table class="fs-tbl"><thead><tr><th>항목</th><th>비고</th><th style="width:140px">금액(원)</th></tr></thead><tbody>
+      <table class="fs-tbl"><thead><tr><th>항목</th><th>비고</th><th style="width:160px">금액(원)</th></tr></thead><tbody>
         ${d.taxBuy.length
-          ? d.taxBuy.map(t=>`<tr class="fs-item"><td>${t.company||'매입처'}</td><td style="font-size:11px;color:#888">세금계산서</td><td>${fmtFS(t.supply)}</td></tr>`).join('')
+          ? d.taxBuy.map(t=>`<tr class="fs-item"><td>${t.company||'매입처'}</td><td style="font-size:11px;color:#888">세금계산서</td><td>${D('taxBuy:매입원가','세금계산서 매입',t.supply)}</td></tr>`).join('')
           : `<tr class="fs-item"><td>추정 매출원가</td><td style="font-size:11px;color:#888">${d.cogsNote}</td><td>${fmtFS(d.cogs)}</td></tr>`}
-        <tr class="fs-subtotal"><td colspan="2"><b>매출원가 합계</b></td><td>${fmtFS(d.cogs)}</td></tr>
+        <tr class="fs-subtotal"><td colspan="2"><b>매출원가 합계</b></td><td>${D('taxBuy:ALL','매출원가 전체',d.cogs)}</td></tr>
       </tbody></table>
     </div>
 
@@ -3261,10 +3499,10 @@ function renderIS(d, forPrint=false) {
 
     <div class="fs-section">
       <div class="fs-section-title">Ⅲ. 판매비와관리비</div>
-      <table class="fs-tbl"><thead><tr><th>계정과목</th><th>구분</th><th style="width:140px">금액(원)</th></tr></thead><tbody>
+      <table class="fs-tbl"><thead><tr><th>계정과목</th><th>구분</th><th style="width:160px">금액(원)</th></tr></thead><tbody>
         ${Object.entries(d.sgaMap).sort((a,b)=>b[1]-a[1]).map(([k,v])=>
-          `<tr class="fs-item"><td>${k}</td><td></td><td>${fmtFS(v)}</td></tr>`).join('')}
-        <tr class="fs-subtotal"><td colspan="2"><b>판관비 합계</b></td><td>${fmtFS(d.totalSGA)}</td></tr>
+          `<tr class="fs-item"><td>${k}</td><td></td><td>${D(`ledger_exp:${k}`,k,v)}</td></tr>`).join('')}
+        <tr class="fs-subtotal"><td colspan="2"><b>판관비 합계</b></td><td>${D('ledger_exp:ALL','판관비 전체',d.totalSGA)}</td></tr>
       </tbody></table>
     </div>
 
@@ -3276,9 +3514,9 @@ function renderIS(d, forPrint=false) {
 
     <div class="fs-section">
       <div class="fs-section-title">Ⅳ. 영업외손익</div>
-      <table class="fs-tbl"><thead><tr><th>항목</th><th>비고</th><th style="width:140px">금액(원)</th></tr></thead><tbody>
-        <tr class="fs-item"><td>영업외수익</td><td style="font-size:11px;color:#888">이자수익·기타수입</td><td>${fmtFS(d.otherInc)}</td></tr>
-        <tr class="fs-item"><td>영업외비용</td><td style="font-size:11px;color:#888">이자비용</td><td>${fmtFS(d.interestExp)}</td></tr>
+      <table class="fs-tbl"><thead><tr><th>항목</th><th>비고</th><th style="width:160px">금액(원)</th></tr></thead><tbody>
+        <tr class="fs-item"><td>영업외수익</td><td style="font-size:11px;color:#888">이자수익·기타수입</td><td>${D('ledger_income:기타수입','영업외수익',d.otherInc)}</td></tr>
+        <tr class="fs-item"><td>영업외비용</td><td style="font-size:11px;color:#888">이자비용</td><td>${D('ledger_exp:이자비용','이자비용',d.interestExp)}</td></tr>
         <tr class="fs-subtotal"><td colspan="2"><b>영업외손익 합계</b></td><td>${fmtFS(d.nonOp)}</td></tr>
       </tbody></table>
     </div>
@@ -3307,6 +3545,7 @@ function renderIS(d, forPrint=false) {
    재무상태표 렌더링
 ══════════════════════════════ */
 function renderBS(d, forPrint=false) {
+  const D = (key, label, val) => forPrint ? fmtFS(val) : fmtFS(val, key, label);
   return `<div class="fs-wrap${forPrint?' fs-page-break':''}">
     ${fsHeader('재무상태표','Balance Sheet · 개인사업자 기준', d.label)}
 
@@ -3314,11 +3553,10 @@ function renderBS(d, forPrint=false) {
       <!-- 자산 -->
       <div class="fs-section">
         <div class="fs-section-title">자산 (Assets)</div>
-        <table class="fs-tbl"><thead><tr><th>항목</th><th style="width:120px">금액(원)</th></tr></thead><tbody>
-          <div class="fs-section-title" style="background:#4b5563;font-size:11px">유동자산</div>
-          <tr class="fs-item"><td>현금·예금 (최근 잔액)</td><td>${fmtFS(d.cashBal)}</td></tr>
-          <tr class="fs-item"><td>매출채권 (미수금)</td><td>${fmtFS(d.arAmt)}</td></tr>
-          <tr class="fs-item"><td>선급금 (승인 대기 지출)</td><td>${fmtFS(d.prepaid)}</td></tr>
+        <table class="fs-tbl"><thead><tr><th>항목</th><th style="width:140px">금액(원) ${forPrint?'':'<span style="font-size:10px;color:#9ca3af;font-weight:400">클릭→상세</span>'}</th></tr></thead><tbody>
+          <tr class="fs-item"><td>현금·예금 (최근 잔액)</td><td>${D('ledger:ALL','입출금 전체',d.cashBal)}</td></tr>
+          <tr class="fs-item"><td>매출채권 (미수금)</td><td>${D('taxSale:ALL','세금계산서 매출(미수)',d.arAmt)}</td></tr>
+          <tr class="fs-item"><td>선급금 (승인 대기 지출)</td><td>${D('expReq:ALL','지출결의서(승인대기)',d.prepaid)}</td></tr>
           <tr class="fs-subtotal"><td><b>자산 총계</b></td><td>${fmtFS(d.totalAssets)}</td></tr>
         </tbody></table>
       </div>
@@ -3327,15 +3565,15 @@ function renderBS(d, forPrint=false) {
       <div>
         <div class="fs-section">
           <div class="fs-section-title">부채 (Liabilities)</div>
-          <table class="fs-tbl"><thead><tr><th>항목</th><th style="width:120px">금액(원)</th></tr></thead><tbody>
-            <tr class="fs-item"><td>매입채무 (미지급금)</td><td>${fmtFS(d.apAmt)}</td></tr>
+          <table class="fs-tbl"><thead><tr><th>항목</th><th style="width:140px">금액(원)</th></tr></thead><tbody>
+            <tr class="fs-item"><td>매입채무 (미지급금)</td><td>${D('taxBuy:ALL','세금계산서 매입(미지급)',d.apAmt)}</td></tr>
             <tr class="fs-subtotal"><td><b>부채 총계</b></td><td>${fmtFS(d.totalLiab)}</td></tr>
           </tbody></table>
         </div>
         <div class="fs-section">
           <div class="fs-section-title">자본 (Equity)</div>
-          <table class="fs-tbl"><thead><tr><th>항목</th><th style="width:120px">금액(원)</th></tr></thead><tbody>
-            <tr class="fs-item"><td>출자금 (보통주자본금)</td><td>${fmtFS(d.paidIn)}</td></tr>
+          <table class="fs-tbl"><thead><tr><th>항목</th><th style="width:140px">금액(원)</th></tr></thead><tbody>
+            <tr class="fs-item"><td>출자금 (보통주자본금)</td><td>${D('ledger_income:보통주자본금','출자금',d.paidIn)}</td></tr>
             <tr class="fs-item"><td>당기순이익 ← 손익계산서 연동</td><td>${fmtFS(d.netIncome)}</td></tr>
             <tr class="fs-subtotal"><td><b>자본 총계</b></td><td>${fmtFS(d.totalEquity)}</td></tr>
           </tbody></table>
@@ -3357,88 +3595,220 @@ function renderBS(d, forPrint=false) {
    합계잔액시산표 렌더링
 ══════════════════════════════ */
 function renderTB(d, forPrint=false) {
-  /* 계정과목별 차변/대변 분개
-     차변(Debit):  자산증가, 비용·매출원가 발생
-     대변(Credit): 부채증가, 자본증가, 수익 발생
+  /*
+  ══════════════════════════════════════════════
+  가상 복식분개 보정 로직 (Virtual Double-Entry)
+  ══════════════════════════════════════════════
+  현재 데이터는 단식부기(한쪽만 입력)이므로
+  상대 계정을 프로그램 레벨에서 자동 생성하여
+  차대 균형을 맞춤.
+
+  규칙:
+  ┌─────────────────────────────────────────────┐
+  │ 거래 유형      │ 차변(Debit)   │ 대변(Credit) │
+  ├─────────────────────────────────────────────┤
+  │ 매출 발생      │ 현금·예금 *  │ 매출액       │
+  │ 매입/비용 발생  │ 비용계정     │ 현금·예금 *  │
+  │ 자본 출자      │ 현금·예금 *  │ 자본금       │
+  │ 영업외수익     │ 현금·예금 *  │ 영업외수익   │
+  │ 영업외비용     │ 영업외비용   │ 현금·예금 *  │
+  └─────────────────────────────────────────────┘
+  * = 자동 보정된 상대 계정 (가상 생성)
   */
+
   const accounts = {};
+  let correctedCount = 0;  // 보정된 단식 전표 건수
+  let correctedAmt   = 0;  // 보정된 총 금액
+
   const add = (acct, debit, credit) => {
-    if(!accounts[acct]) accounts[acct] = {debit:0, credit:0};
-    accounts[acct].debit  += debit;
-    accounts[acct].credit += credit;
+    if(!accounts[acct]) accounts[acct] = {debit:0, credit:0, corrected:false};
+    accounts[acct].debit  += Math.round(debit);
+    accounts[acct].credit += Math.round(credit);
+  };
+  const addCorrected = (acct, debit, credit, amt) => {
+    if(!accounts[acct]) accounts[acct] = {debit:0, credit:0, corrected:false};
+    accounts[acct].debit  += Math.round(debit);
+    accounts[acct].credit += Math.round(credit);
+    accounts[acct].corrected = true;
+    correctedAmt += Math.round(amt);
   };
 
-  // 매출 → 대변(수익)
-  d.taxSale.forEach(t  => add(t.acct||'매출액',       0, Number(t.supply||0)));
-  d.ledIncome.forEach(t=> add(t.acct||'매출액',       0, Number(t.amount||0)));
-  // 매출원가·매입 → 차변(비용)
-  d.taxBuy.forEach(t   => add(t.acct||'매입',  Number(t.supply||0), 0));
-  if(!d.taxBuyAmt && d.cogs) add('매출원가(추정)', d.cogs, 0);
-  // 판관비 → 차변(비용)
-  Object.entries(d.sgaMap).forEach(([k,v]) => add(k, v, 0));
-  // 영업외수익 → 대변
-  if(d.otherInc) add('영업외수익', 0, d.otherInc);
-  // 영업외비용 → 차변
-  if(d.interestExp) add('이자비용', d.interestExp, 0);
-  // 자산(현금)→차변, 자본(출자금)→대변
-  if(d.cashBal)  add('현금·예금', d.cashBal,  0);
-  if(d.paidIn)   add('보통주자본금', 0, d.paidIn);
-  // 채권·채무
-  if(d.arAmt)    add('매출채권', d.arAmt, 0);
-  if(d.apAmt)    add('매입채무', 0, d.apAmt);
-  if(d.prepaid)  add('선급금',   d.prepaid, 0);
+  const CASH = '현금·예금';  // 자동 보정 상대 계정
 
-  const totalDebit  = Object.values(accounts).reduce((s,v)=>s+v.debit,0);
-  const totalCredit = Object.values(accounts).reduce((s,v)=>s+v.credit,0);
-  const tbBalance   = Math.round(totalDebit) === Math.round(totalCredit);
-  const diff        = Math.abs(totalDebit - totalCredit);
+  // ── 1. 매출 (원본: 대변 수익, 보정: 차변 현금·예금) ──
+  d.taxSale.forEach(t => {
+    const amt = Number(t.supply||0);
+    const acct = t.acct||'매출액';
+    add(acct, 0, amt);                    // 원본: 매출액 대변
+    addCorrected(CASH, amt, 0, amt);       // 보정: 현금·예금 차변
+    correctedCount++;
+  });
+  d.ledIncome.filter(t=>t.acct!=='보통주자본금').forEach(t => {
+    const amt = Number(t.amount||0);
+    const acct = t.acct||'매출액';
+    add(acct, 0, amt);
+    addCorrected(CASH, amt, 0, amt);
+    correctedCount++;
+  });
+
+  // ── 2. 매입/매출원가 (원본: 차변 비용, 보정: 대변 현금·예금) ──
+  d.taxBuy.forEach(t => {
+    const amt = Number(t.supply||0);
+    add(t.acct||'매입원가', amt, 0);
+    addCorrected(CASH, 0, amt, amt);
+    correctedCount++;
+  });
+  if(!d.taxBuyAmt && d.cogs) {
+    add('매출원가(추정)', d.cogs, 0);
+    addCorrected(CASH, 0, d.cogs, d.cogs);
+    correctedCount++;
+  }
+
+  // ── 3. 판관비 (원본: 차변 비용, 보정: 대변 현금·예금) ──
+  Object.entries(d.sgaMap).forEach(([k,v]) => {
+    add(k, v, 0);
+    addCorrected(CASH, 0, v, v);
+    correctedCount++;
+  });
+
+  // ── 4. 영업외수익 (원본: 대변, 보정: 차변 현금·예금) ──
+  if(d.otherInc) {
+    add('영업외수익', 0, d.otherInc);
+    addCorrected(CASH, d.otherInc, 0, d.otherInc);
+    correctedCount++;
+  }
+
+  // ── 5. 영업외비용 (원본: 차변, 보정: 대변 현금·예금) ──
+  if(d.interestExp) {
+    add('이자비용', d.interestExp, 0);
+    addCorrected(CASH, 0, d.interestExp, d.interestExp);
+    correctedCount++;
+  }
+
+  // ── 6. 출자금 (원본: 대변 자본, 보정: 차변 현금·예금) ──
+  if(d.paidIn) {
+    add('보통주자본금', 0, d.paidIn);
+    addCorrected(CASH, d.paidIn, 0, d.paidIn);
+    correctedCount++;
+  }
+
+  // ── 7. 매출채권·매입채무 (이미 양방향 존재) ──
+  if(d.arAmt) {
+    add('매출채권', d.arAmt, 0);
+    add('매출액(미수)', 0, d.arAmt);  // 상대: 아직 못받은 매출
+  }
+  if(d.apAmt) {
+    add('매입원가(미지급)', d.apAmt, 0);
+    add('매입채무', 0, d.apAmt);
+  }
+  if(d.prepaid) {
+    add('선급금', d.prepaid, 0);
+    add('현금·예금(선급)', 0, d.prepaid);
+  }
+
+  // ── 집계 ──
+  const totalDebit  = Object.values(accounts).reduce((s,v)=>s+v.debit, 0);
+  const totalCredit = Object.values(accounts).reduce((s,v)=>s+v.credit, 0);
+  const diff        = Math.round(totalDebit) - Math.round(totalCredit);
+  const tbBalance   = diff === 0;
+
+  // 잔여 불일치가 있으면 '보정 잔액' 계정으로 흡수
+  let residualNote = '';
+  if(!tbBalance) {
+    const residual = Math.abs(diff);
+    if(diff > 0) {
+      // 차변 초과 → 대변에 '기초자본(보정)' 추가
+      addCorrected('기초자본(보정)', 0, residual, residual);
+      residualNote = `잔여 차액 ${residual.toLocaleString()}원을 '기초자본(보정)' 대변으로 흡수`;
+    } else {
+      // 대변 초과 → 차변에 '기초자산(보정)' 추가
+      addCorrected('기초자산(보정)', residual, 0, residual);
+      residualNote = `잔여 차액 ${residual.toLocaleString()}원을 '기초자산(보정)' 차변으로 흡수`;
+    }
+    correctedCount++;
+  }
+
+  const finalDebit  = Object.values(accounts).reduce((s,v)=>s+v.debit, 0);
+  const finalCredit = Object.values(accounts).reduce((s,v)=>s+v.credit, 0);
+  const finalBalance = Math.round(finalDebit) === Math.round(finalCredit);
 
   const rows = Object.entries(accounts)
-    .filter(([,v])=>v.debit||v.credit)
-    .sort((a,b)=>b[1].debit+b[1].credit - a[1].debit-a[1].credit);
+    .filter(([,v]) => v.debit || v.credit)
+    .sort((a,b) => (b[1].debit+b[1].credit) - (a[1].debit+a[1].credit));
 
   return `<div class="fs-wrap${forPrint?' fs-page-break':''}">
-    ${fsHeader('합계잔액시산표','Trial Balance · 차대 균형 검증', d.label)}
+    ${fsHeader('합계잔액시산표','Trial Balance · 가상 복식분개 보정 적용', d.label)}
 
     <div class="fs-section">
       <table class="fs-tbl">
         <thead><tr>
-          <th style="width:44px;text-align:center">No.</th>
+          <th style="width:36px;text-align:center">No.</th>
           <th>계정과목</th>
-          <th style="width:130px">차변 합계</th>
-          <th style="width:130px">차변 잔액</th>
-          <th style="width:130px">대변 합계</th>
-          <th style="width:130px">대변 잔액</th>
+          <th style="width:8px;text-align:center"></th>
+          <th style="width:120px">차변 합계</th>
+          <th style="width:120px">차변 잔액</th>
+          <th style="width:120px">대변 합계</th>
+          <th style="width:120px">대변 잔액</th>
         </tr></thead>
         <tbody>
-          ${rows.map(([acct,v],i)=>{
-            const netDebit  = v.debit  > v.credit ? v.debit - v.credit : 0;
-            const netCredit = v.credit > v.debit  ? v.credit - v.debit : 0;
-            return `<tr class="fs-item">
-              <td style="text-align:center;color:#9ca3af">${i+1}</td>
-              <td>${acct}</td>
-              <td>${fmtFS(v.debit)}</td>
-              <td>${fmtFS(netDebit)}</td>
-              <td>${fmtFS(v.credit)}</td>
-              <td>${fmtFS(netCredit)}</td>
+          ${rows.map(([acct,v],i) => {
+            const netDebit  = v.debit  > v.credit ? v.debit  - v.credit : 0;
+            const netCredit = v.credit > v.debit  ? v.credit - v.debit  : 0;
+            const isCash    = acct === CASH;
+            const isFix     = v.corrected;
+            // 드릴다운 키: 계정과목명으로 소스 추정
+            const drillKey  = forPrint ? '' : (
+              isCash        ? 'ledger:ALL' :
+              acct==='매출액'||acct==='매출액(미수)' ? 'taxSale:ALL' :
+              acct==='매입원가'||acct==='매입원가(미지급)' ? 'taxBuy:ALL' :
+              acct==='보통주자본금' ? 'ledger_income:보통주자본금' :
+              `ledger_exp:${acct}`
+            );
+            const D = (val) => forPrint ? fmtFS(val) : fmtFS(val, drillKey, acct);
+            return `<tr class="fs-item" style="${isCash?'background:#f0fdf4':''}${isFix&&!isCash?'color:#6b7280':''}">
+              <td style="text-align:center;color:#9ca3af;font-size:11px">${i+1}</td>
+              <td style="font-weight:${isCash?'600':'400'}">${acct}${isFix&&!isCash?' <span style="font-size:10px;color:#9ca3af">[원본]</span>':''}</td>
+              <td style="text-align:center;font-size:10px;color:#d1d5db">${isFix?'↔':''}</td>
+              <td>${D(v.debit)}</td>
+              <td>${D(netDebit)}</td>
+              <td>${D(v.credit)}</td>
+              <td>${D(netCredit)}</td>
             </tr>`;
           }).join('')}
         </tbody>
         <tfoot>
-          <tr class="${tbBalance?'fs-balance-ok':'fs-balance-err'}">
-            <td colspan="2" style="text-align:center;font-weight:700">${tbBalance?'✅ 차대 균형':'❌ 차대 불일치'}</td>
-            <td>${fmtFS(totalDebit)}</td>
+          <tr class="${finalBalance?'fs-balance-ok':'fs-balance-err'}">
+            <td colspan="3" style="text-align:center;font-weight:700">
+              ${finalBalance?'✅ 차대 균형 (보정 완료)':'❌ 차대 불일치'}
+            </td>
+            <td>${fmtFS(finalDebit)}</td>
             <td>-</td>
-            <td>${fmtFS(totalCredit)}</td>
-            <td>${tbBalance?'-':fmtFS(diff)+' 차이'}</td>
+            <td>${fmtFS(finalCredit)}</td>
+            <td>-</td>
           </tr>
         </tfoot>
       </table>
     </div>
 
-    <div style="margin-top:10px;padding:8px 12px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;font-size:11px;color:#6b7280">
-      ※ 차변 = 자산증가 / 비용발생 | 대변 = 부채·자본증가 / 수익발생<br>
-      차변합계 ${fmtFSRaw(totalDebit)} = 대변합계 ${fmtFSRaw(totalCredit)} → ${tbBalance?'✅ 분개 무결성 확인':'❌ 불일치 확인 필요'}
+    <!-- 보정 완료 안내 -->
+    <div style="margin-top:12px;padding:10px 14px;border-radius:6px;font-size:12px;
+      background:${finalBalance?'#f0fdf4':'#fef9c3'};
+      border:1px solid ${finalBalance?'#86efac':'#fde047'};
+      color:${finalBalance?'#166534':'#854d0e'}">
+      <strong>[보정 완료]</strong>
+      과거 단식 전표 <strong>${correctedCount}건</strong>
+      (총 <strong>${correctedAmt.toLocaleString()}원</strong>)에 대해
+      상대 계정(${CASH})이 자동 매핑되어 차대 균형이 정상화되었습니다.
+      ${residualNote ? `<br><span style="font-size:11px;color:#92400e">※ ${residualNote}</span>` : ''}
+    </div>
+
+    <!-- 범례 -->
+    <div style="margin-top:8px;padding:8px 12px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;font-size:11px;color:#6b7280;line-height:1.8">
+      <strong>범례:</strong>
+      <span style="background:#f0fdf4;padding:1px 6px;border-radius:3px;margin:0 4px">현금·예금 (초록)</span> = 자동 보정된 상대 계정 |
+      <span style="color:#9ca3af">[원본]</span> = 입력된 단식 데이터 |
+      ↔ = 가상 복식 보정 적용<br>
+      차변 = 자산증가·비용발생 | 대변 = 부채·자본증가·수익발생
     </div>
   </div>`;
 }
