@@ -3168,62 +3168,52 @@ let _drillData = []; // 현재 모달 데이터 (CSV/인쇄용)
 function getDrillRows(key, start, end) {
   const [src, acct] = key.split(':');
   const rows = [];
-
   const inRange = d => d >= start && d <= end;
 
   if(src === 'taxSale') {
+    // 세금계산서 매출 (참고용)
     taxInv.filter(t => t.ditype==='매출' && inRange((t.date||'').slice(0,10)))
       .forEach(t => rows.push({
         date: t.date, acct: t.acct||'매출액',
-        partner: t.company||'', desc: `${t.kind||''} (공급가)`,
-        amount: Number(t.supply||0), note: t.appno||''
+        partner: t.company||'', desc: `${t.kind||''} ${t.item||''}`.trim(),
+        amount: Number(t.supply||0), note: t.status||''
       }));
   } else if(src === 'taxBuy') {
+    // 세금계산서 매입
     taxInv.filter(t => t.ditype==='매입' && inRange((t.date||'').slice(0,10)))
       .forEach(t => rows.push({
         date: t.date, acct: t.acct||'매입원가',
-        partner: t.company||'', desc: `${t.kind||''} (공급가)`,
-        amount: Number(t.supply||0), note: t.appno||''
+        partner: t.company||'', desc: `${t.kind||''} ${t.item||''}`.trim(),
+        amount: Number(t.supply||0), note: t.status||''
       }));
-  } else if(src === 'ledger') {
-    ledger.filter(t => inRange(t.date) && (acct==='ALL' || t.acct===acct))
+  } else if(src === 'ledger' || src === 'ledger_income' || src === 'ledger_exp') {
+    // ★ 입출금 내역 기준 (단일 소스)
+    ledger
+      .filter(t => {
+        if(!inRange(t.date)) return false;
+        if(src === 'ledger_income') return t.type === 'income'  && (acct==='ALL' || t.acct===acct);
+        if(src === 'ledger_exp')    return t.type === 'expense' && (acct==='ALL' || t.acct===acct);
+        return acct==='ALL' || t.acct===acct;
+      })
       .forEach(t => rows.push({
         date: t.date, acct: t.acct||'',
         partner: t.bank||'', desc: t.desc||'',
         amount: Number(t.amount||0), note: t.note||''
-      }));
-  } else if(src === 'ledger_income') {
-    ledger.filter(t => t.type==='income' && inRange(t.date) && (acct==='ALL' || t.acct===acct))
-      .forEach(t => rows.push({
-        date: t.date, acct: t.acct||'',
-        partner: t.bank||'', desc: t.desc||'',
-        amount: Number(t.amount||0), note: t.note||''
-      }));
-  } else if(src === 'ledger_exp') {
-    ledger.filter(t => t.type==='expense' && inRange(t.date) && !t.linkedExpId && (acct==='ALL' || t.acct===acct))
-      .forEach(t => rows.push({
-        date: t.date, acct: t.acct||'',
-        partner: t.bank||'', desc: t.desc||'',
-        amount: Number(t.amount||0), note: t.note||''
-      }));
-  } else if(src === 'card') {
-    cards.filter(t => t.biztype!=='개인' && inRange(t.date) && (acct==='ALL' || t.acct===acct))
-      .forEach(t => rows.push({
-        date: t.date, acct: t.acct||'',
-        partner: t.merchant||'', desc: t.item||t.merchant||'',
-        amount: Number(t.amount||0), note: t.card||''
       }));
   } else if(src === 'expReq') {
-    expReqs.filter(t => t.status==='지급완료' && inRange(t.draftDate||'') && (acct==='ALL' || t.acct===acct))
+    // 지출결의서 (선급금 상세용)
+    expReqs
+      .filter(t => t.status==='승인' && inRange(t.draftDate||''))
       .forEach(t => rows.push({
         date: t.payDate||t.draftDate, acct: t.acct||'',
         partner: t.payee||'', desc: t.title||'',
-        amount: Number(t.amount||0), note: t.method||''
+        amount: Number(t.amount||0), note: `${t.method||''} (승인대기)`
       }));
   }
 
   return rows.sort((a,b) => a.date.localeCompare(b.date));
 }
+
 
 function openDrill(key, label, expectedTotal) {
   // 현재 활성 재무제표 페이지의 기간 파악
@@ -3384,7 +3374,6 @@ function calcFSData(prefix) {
   const yr  = document.getElementById(`${prefix}-year`)?.value || '2026';
   const mo1 = fsTab==='month' ? (document.getElementById(`${prefix}-from`)?.value||'01') : '01';
   const mo2 = fsTab==='month' ? (document.getElementById(`${prefix}-to`)?.value||'12')   : '12';
-  const mg  = parseFloat(document.getElementById(`${prefix}-margin`)?.value||'80')/100;
 
   const start = `${yr}-${mo1}-01`;
   const end   = `${yr}-${mo2}-31`;
@@ -3392,85 +3381,111 @@ function calcFSData(prefix) {
     ? (mo1===mo2 ? `${yr}년 ${parseInt(mo1)}월` : `${yr}년 ${parseInt(mo1)}~${parseInt(mo2)}월`)
     : `${yr}년 (연간)`;
 
-  // ── 매출 ──
+  /* ══════════════════════════════════════
+     단일 소스: 입출금 내역(ledger)만 사용
+     - 지출결의서 지급완료 → 입출금에 자동 반영됨
+     - 법인카드 → 담당자가 입출금에 수동 등록
+     - 세금계산서 → 참고용(매출채권/매입채무 계산에만 사용)
+  ══════════════════════════════════════ */
+
+  const ledPeriod = fsFilter(ledger, 'date', start, end);
+
+  // ── 매출액: 입출금 입금 중 매출 계정과목 ──
+  const INCOME_ACCTS = ['매출액','매출','간병비','요양비','케어비'];  // 매출로 볼 계정과목
+  const CAPITAL_ACCTS = ['보통주자본금'];                            // 자본 투입 (매출 제외)
+  const OTHER_INCOME_ACCTS = ['기타수입','이자수익'];                 // 영업외수익
+
+  const ledSale = ledPeriod.filter(t =>
+    t.type === 'income' &&
+    !CAPITAL_ACCTS.includes(t.acct) &&
+    !OTHER_INCOME_ACCTS.includes(t.acct)
+  );
+  const totalRev = ledSale.reduce((s,t) => s+Number(t.amount||0), 0);
+
+  // 세금계산서 매출 (참고용 — 드릴다운 상세에서 함께 표시)
   const taxSale = fsFilter(taxInv,'date',start,end).filter(t=>t.ditype==='매출');
   const taxSaleAmt = taxSale.reduce((s,t)=>s+Number(t.supply||0),0);
-  const ledIncome  = fsFilter(ledger,'date',start,end)
-    .filter(t=>t.type==='income' && !['보통주자본금','기타수입','이자수익'].includes(t.acct));
-  const ledIncomeAmt = ledIncome.reduce((s,t)=>s+Number(t.amount||0),0);
-  const totalRev = taxSaleAmt + ledIncomeAmt;
 
-  // ── 매출원가 ──
-  const taxBuy    = fsFilter(taxInv,'date',start,end).filter(t=>t.ditype==='매입');
+  // ── 매출원가: 세금계산서 매입 (있으면 사용, 없으면 0) ──
+  const taxBuy = fsFilter(taxInv,'date',start,end).filter(t=>t.ditype==='매입');
   const taxBuyAmt = taxBuy.reduce((s,t)=>s+Number(t.supply||0),0);
-  const cogs      = taxBuyAmt>0 ? taxBuyAmt : Math.round(totalRev*(1-mg));
-  const cogsNote  = taxBuyAmt>0 ? '세금계산서 매입 기준' : `마진율${Math.round(mg*100)}% 적용`;
+  const cogs = taxBuyAmt;  // 세금계산서 매입만 원가로 처리
+  const cogsNote = taxBuyAmt > 0 ? '세금계산서 매입 기준' : '해당 기간 매입 없음';
   const grossProfit = totalRev - cogs;
 
-  // ── 판관비 ──
-  const SGA_ACCTS = ['급여','복리후생비','보험료','인쇄비','소모품비','접대비','임차료','통신비','차량유지비','외주비','세금과공과'];
+  // ── 판관비: 입출금 출금 계정과목별 집계 ──
+  const SGA_ACCTS = ['급여','복리후생비','보험료','인쇄비','소모품비','접대비',
+                     '임차료','통신비','차량유지비','외주비','세금과공과'];
   const sgaMap = {};
-  // 입출금 출금 (지출결의 자동생성 제외)
-  fsFilter(ledger,'date',start,end)
-    .filter(t=>t.type==='expense' && !t.linkedExpId)
-    .forEach(t=>{ const k=SGA_ACCTS.includes(t.acct)?t.acct:'기타'; sgaMap[k]=(sgaMap[k]||0)+Number(t.amount||0); });
-  // 지출결의서 지급완료
-  fsFilter(expReqs,'draftDate',start,end)
-    .filter(t=>t.status==='지급완료')
-    .forEach(t=>{ const k=SGA_ACCTS.includes(t.acct)?t.acct:'기타'; sgaMap[k]=(sgaMap[k]||0)+Number(t.amount||0); });
-  // 법인카드 (업무용)
-  fsFilter(cards,'date',start,end)
-    .filter(t=>t.biztype!=='개인')
-    .forEach(t=>{ const k=SGA_ACCTS.includes(t.acct)?t.acct:'기타'; sgaMap[k]=(sgaMap[k]||0)+Number(t.amount||0); });
-  const totalSGA  = Object.values(sgaMap).reduce((s,v)=>s+v,0);
-  const opProfit  = grossProfit - totalSGA;
+  ledPeriod
+    .filter(t => t.type === 'expense')
+    .forEach(t => {
+      const k = SGA_ACCTS.includes(t.acct) ? t.acct : '기타';
+      sgaMap[k] = (sgaMap[k]||0) + Number(t.amount||0);
+    });
+  const totalSGA   = Object.values(sgaMap).reduce((s,v)=>s+v, 0);
+  const opProfit   = grossProfit - totalSGA;
 
-  // ── 영업외손익 ──
-  const otherInc = fsFilter(ledger,'date',start,end)
-    .filter(t=>t.type==='income' && ['기타수입','이자수익'].includes(t.acct))
-    .reduce((s,t)=>s+Number(t.amount||0),0);
-  const interestExp = fsFilter(ledger,'date',start,end)
-    .filter(t=>t.type==='expense' && t.acct==='이자비용')
-    .reduce((s,t)=>s+Number(t.amount||0),0);
-  const nonOp = otherInc - interestExp;
+  // ── 영업외손익: 입출금 기준 ──
+  const otherInc = ledPeriod
+    .filter(t => t.type==='income' && OTHER_INCOME_ACCTS.includes(t.acct))
+    .reduce((s,t) => s+Number(t.amount||0), 0);
+  const interestExp = ledPeriod
+    .filter(t => t.type==='expense' && t.acct==='이자비용')
+    .reduce((s,t) => s+Number(t.amount||0), 0);
+  const nonOp    = otherInc - interestExp;
   const netIncome = opProfit + nonOp;
 
-  // ── 자산 (재무상태표용) ──
-  // 현금·예금: 가장 최근 ledger 잔액
-  const latestLedger = [...ledger].filter(l=>Number(l.balance)>0).sort((a,b)=>b.date.localeCompare(a.date))[0];
-  const cashBal      = latestLedger ? Number(latestLedger.balance) : 0;
-  // 매출채권: 미완료 세금계산서 매출 합계
-  const arAmt = taxInv.filter(t=>t.ditype==='매출'&&t.status!=='완료').reduce((s,t)=>s+Number(t.total||0),0);
-  // 선급금: 미완료 지출결의 승인 건
-  const prepaid = expReqs.filter(t=>t.status==='승인').reduce((s,t)=>s+Number(t.amount||0),0);
+  // ── 재무상태표 ──
+  // 현금·예금: 기간 내 가장 최신 잔액
+  const latestInPeriod = [...ledPeriod]
+    .filter(l => Number(l.balance) > 0)
+    .sort((a,b) => b.date.localeCompare(a.date))[0];
+  const cashBal = latestInPeriod ? Number(latestInPeriod.balance) : 0;
+
+  // 매출채권: 미완료 세금계산서 매출
+  const arAmt = taxInv
+    .filter(t => t.ditype==='매출' && t.status!=='완료')
+    .reduce((s,t) => s+Number(t.total||0), 0);
+
+  // 선급금: 승인 상태 지출결의서
+  const prepaid = expReqs
+    .filter(t => t.status==='승인')
+    .reduce((s,t) => s+Number(t.amount||0), 0);
+
   const totalAssets = cashBal + arAmt + prepaid;
 
-  // ── 부채 ──
-  const apAmt = taxInv.filter(t=>t.ditype==='매입'&&t.status!=='완료').reduce((s,t)=>s+Number(t.total||0),0);
+  // 매입채무: 미완료 세금계산서 매입
+  const apAmt = taxInv
+    .filter(t => t.ditype==='매입' && t.status!=='완료')
+    .reduce((s,t) => s+Number(t.total||0), 0);
   const totalLiab = apAmt;
 
-  // ── 자본 ──
-  const paidIn = fsFilter(ledger,'date',start,end)
-    .filter(t=>t.type==='income'&&t.acct==='보통주자본금')
-    .reduce((s,t)=>s+Number(t.amount||0),0);
-  const totalEquity  = paidIn + netIncome;
-  const liabEquity   = totalLiab + totalEquity;
-  const bsBalance    = Math.round(totalAssets) === Math.round(liabEquity);
+  // 자본: 출자금(입출금 기준) + 당기순이익
+  const paidIn = ledPeriod
+    .filter(t => t.type==='income' && CAPITAL_ACCTS.includes(t.acct))
+    .reduce((s,t) => s+Number(t.amount||0), 0);
+  const totalEquity = paidIn + netIncome;
+  const liabEquity  = totalLiab + totalEquity;
+  const bsBalance   = Math.round(totalAssets) === Math.round(liabEquity);
 
   return {
-    yr, mo1, mo2, start, end, label, mg, cogsNote,
-    // P&L
-    taxSaleAmt, ledIncomeAmt, totalRev,
-    taxBuyAmt, cogs, grossProfit,
+    yr, mo1, mo2, start, end, label, cogsNote,
+    // P&L (입출금 기준)
+    ledSale, totalRev,
+    taxSale, taxSaleAmt,
+    taxBuy, taxBuyAmt, cogs, grossProfit,
     sgaMap, totalSGA, opProfit,
     otherInc, interestExp, nonOp, netIncome,
-    taxSale, taxBuy, ledIncome,
+    // ledIncome 하위 호환 (드릴다운용)
+    ledIncome: ledSale,
     // B/S
     cashBal, arAmt, prepaid, totalAssets,
     apAmt, totalLiab,
     paidIn, totalEquity, liabEquity, bsBalance,
   };
 }
+
 
 /* ══════════════════════════════
    손익계산서 렌더링
@@ -3489,10 +3504,13 @@ function renderIS(d, forPrint=false) {
         <span id="is-rev-icon" style="font-size:11px;color:#9ca3af">▲ 접기</span>
       </div>
       <div id="is-rev-body">
-      <table class="fs-tbl"><thead><tr><th>항목</th><th>비고</th><th style="width:160px">금액(원) ${forPrint?'':'<span style="font-size:10px;color:#9ca3af;font-weight:400">클릭 시 상세</span>'}</th></tr></thead><tbody>
-        ${d.taxSale.map(t=>`<tr class="fs-item"><td>${t.company||'매출처'}</td><td style="font-size:11px;color:#888">세금계산서</td><td>${D('taxSale:매출액','세금계산서 매출',t.supply)}</td></tr>`).join('')}
-        ${d.ledIncome.map(t=>`<tr class="fs-item"><td>${t.desc}</td><td style="font-size:11px;color:#888">직접입력</td><td>${D(`ledger_income:${t.acct||'매출액'}`,t.acct||'매출액',t.amount)}</td></tr>`).join('')}
-        <tr class="fs-subtotal"><td colspan="2"><b>매출액 합계</b></td><td>${D('taxSale:ALL','매출액 전체',d.totalRev)}</td></tr>
+      <table class="fs-tbl"><thead><tr><th>항목 (입출금 내역 기준)</th><th>비고</th><th style="width:160px">금액(원) ${forPrint?'':'<span style="font-size:10px;color:#9ca3af;font-weight:400">클릭 시 상세</span>'}</th></tr></thead><tbody>
+        ${d.ledSale.length
+          ? d.ledSale.map(t=>`<tr class="fs-item"><td>${t.desc}</td><td style="font-size:11px;color:#888">${t.acct||'매출'}</td><td>${D('ledger_income:ALL','매출 입금 전체',t.amount)}</td></tr>`).join('')
+          : '<tr class="fs-item"><td colspan="2" style="color:var(--tm)">해당 기간 매출 입금 내역 없음</td><td>-</td></tr>'
+        }
+        ${d.taxSaleAmt ? `<tr class="fs-item" style="color:#6b7280"><td>※ 세금계산서 매출 참고</td><td style="font-size:11px;color:#9ca3af">공급가 기준</td><td style="color:#6b7280">${D('taxSale:ALL','세금계산서 매출',d.taxSaleAmt)}</td></tr>` : ''}
+        <tr class="fs-subtotal"><td colspan="2"><b>매출액 합계</b></td><td>${D('ledger_income:ALL','매출 전체',d.totalRev)}</td></tr>
       </tbody></table>
       </div>
     </div>
