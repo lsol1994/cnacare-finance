@@ -4297,20 +4297,6 @@ function renderBS(d, forPrint=false) {
             <tr class="fs-subtotal">
               <td colspan="2"><b>부채·자본 총계</b></td>
               <td>${fmtFS(d.liabEquity)}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- 대차평균 검증 -->
-    <div class="${d.bsBalance?'fs-balance-badge ok':'fs-balance-badge err'}" style="margin-top:12px">
-      ${d.bsBalance
-        ? '✅ 대차 균형 (자산 총계 = 부채 + 자본)'
-        : `❌ 대차 불일치 | 자산: ${fmtFSRaw(d.totalAssets)} / 부채+자본: ${fmtFSRaw(d.liabEquity)} | 차액: ${fmtFSRaw(Math.abs(d.totalAssets-d.liabEquity))}`}
-    </div>
-  </div>`;
-}
 
 
 /* ══════════════════════════════
