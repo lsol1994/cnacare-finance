@@ -3687,13 +3687,16 @@ function calcFSData(prefix) {
     .filter(t => t.status==='승인')
     .reduce((s,t) => s+Number(t.amount||0), 0);
 
-  // ③ 현금·예금: 입출금 내역의 가장 최신 잔액
-  const latestLedger = [...ledger]
-    .filter(l => Number(l.balance) > 0)
-    .sort((a,b) => b.date.localeCompare(a.date))[0];
-  const bsCash = latestLedger ? Number(latestLedger.balance) : 0;
+  // ③ 현금·예금: 조회 기간 말 마지막 잔액
+  const latestInPeriod = [...ledger]
+    .filter(l => l.date <= end && Number(l.balance) > 0)
+    .sort((a,b) => {
+      const dc = b.date.localeCompare(a.date);
+      return dc !== 0 ? dc : Number(b.id) - Number(a.id);
+    })[0];
+  const bsCash = latestInPeriod ? Number(latestInPeriod.balance) : 0;
 
-  // ④ 미수수익: 세금계산서 미완료 매출 (청구했으나 미수령)
+  // ④ 미수수익: 세금계산서 미완료 매출
   const bsArTax = taxInv
     .filter(t => t.ditype==='매출' && t.status!=='완료')
     .reduce((s,t) => s+Number(t.total||0), 0);
@@ -3701,69 +3704,43 @@ function calcFSData(prefix) {
   const totalAssets = bsArWage + bsPrepaid + bsCash + bsArTax;
 
   // ── 부채 ──
-  // ① 단기차입금: 계정과목이 '단기차입금'인 입금 내역 (갚아야 할 금액)
   const bsShortLoan = ledger
     .filter(t => t.type==='income' && t.acct==='단기차입금')
     .reduce((s,t) => s+Number(t.amount||0), 0);
-
-  // ② 미지급금: 지급완료 상태지만 미지급된 지출결의서 (지급완료 중 실제 미처리)
-  //    → 승인 상태 지출결의서 중 선급금 외 일반 비용
   const bsUnpaid = expReqs
     .filter(t => t.status==='대기')
     .reduce((s,t) => s+Number(t.amount||0), 0);
-
-  // ③ 외상매입금: 세금계산서 미완료 매입
   const bsApTax = taxInv
     .filter(t => t.ditype==='매입' && t.status!=='완료')
     .reduce((s,t) => s+Number(t.total||0), 0);
-
   const totalLiab = bsShortLoan + bsUnpaid + bsApTax;
 
   // ── 자본 ──
-  // ① 자본금: 보통주자본금 전체 (기간 무관 누적)
   const bsCapital = ledger
     .filter(t => t.type==='income' && t.acct==='보통주자본금')
     .reduce((s,t) => s+Number(t.amount||0), 0);
 
-  // ② 이익잉여금: 조회기간의 직전 기간 당기순이익
-  //    월별 조회 → 전월 / 연도별 조회 → 전년도
-  const calcNetIncomePeriod = (pStart, pEnd) => {
-    const pLed = ledger.filter(l => l.date >= pStart && l.date <= pEnd);
-    const pRev  = pLed.filter(t=>t.type==='income'&&!CAPITAL_ACCTS.includes(t.acct)&&!OTHER_INCOME_ACCTS.includes(t.acct))
-                      .reduce((s,t)=>s+Number(t.amount||0),0);
-    const pCogs = taxInv.filter(t=>t.ditype==='매입'&&t.date>=pStart&&t.date<=pEnd)
-                        .reduce((s,t)=>s+Number(t.supply||0),0);
-    const pSGA  = pLed.filter(t=>t.type==='expense')
-                      .reduce((s,t)=>s+Number(t.amount||0),0);
-    const pOtherInc = pLed.filter(t=>t.type==='income'&&OTHER_INCOME_ACCTS.includes(t.acct))
-                          .reduce((s,t)=>s+Number(t.amount||0),0);
-    const pIntExp   = pLed.filter(t=>t.type==='expense'&&t.acct==='이자비용')
-                          .reduce((s,t)=>s+Number(t.amount||0),0);
-    return pRev - pCogs - pSGA + pOtherInc - pIntExp;
-  };
+  // 이익잉여금: 창립 이래 기간 말(end)까지 누적 손익
+  const allToEnd = ledger.filter(l => l.date <= end);
+  const cumRev = allToEnd
+    .filter(t => t.type==='income' && !CAPITAL_ACCTS.includes(t.acct) && !OTHER_INCOME_ACCTS.includes(t.acct))
+    .reduce((s,t) => s+Number(t.amount||0), 0);
+  const cumCogs = taxInv
+    .filter(t => t.ditype==='매입' && t.date <= end)
+    .reduce((s,t) => s+Number(t.supply||0), 0);
+  const cumSGA = allToEnd
+    .filter(t => t.type==='expense')
+    .reduce((s,t) => s+Number(t.amount||0), 0);
+  const cumOtherInc = allToEnd
+    .filter(t => t.type==='income' && OTHER_INCOME_ACCTS.includes(t.acct))
+    .reduce((s,t) => s+Number(t.amount||0), 0);
+  const cumIntExp = allToEnd
+    .filter(t => t.type==='expense' && t.acct==='이자비용')
+    .reduce((s,t) => s+Number(t.amount||0), 0);
+  const bsRetained = cumRev - cumCogs - cumSGA + cumOtherInc - cumIntExp;
+  const bsRetainedLabel = '이익잉여금';
 
-  let bsRetained = 0;
-  let bsRetainedLabel = '';
-  if(fsTab === 'month') {
-    // 전월: mo1 기준 1개월 전
-    // JS Date 월은 0-indexed이므로 parseInt(mo1)-2 = 실제 전월
-    // 예) mo1='06' → parseInt('06')=6 → 6-2=4 → Date month 4 = 5월 ✓
-    const prevDate  = new Date(parseInt(yr), parseInt(mo1)-2, 1);
-    const prevYr    = prevDate.getFullYear();
-    const prevMo    = String(prevDate.getMonth()+1).padStart(2,'0');
-    const prevStart = `${prevYr}-${prevMo}-01`;
-    const prevEndDay= new Date(prevYr, prevDate.getMonth()+1, 0).getDate();
-    const prevEnd   = `${prevYr}-${prevMo}-${String(prevEndDay).padStart(2,'0')}`;
-    bsRetained      = calcNetIncomePeriod(prevStart, prevEnd);
-    bsRetainedLabel = `${prevYr}년 ${parseInt(prevMo)}월 당기순이익`;
-  } else {
-    // 전년도
-    const prevYr    = parseInt(yr) - 1;
-    bsRetained      = calcNetIncomePeriod(`${prevYr}-01-01`, `${prevYr}-12-31`);
-    bsRetainedLabel = `${prevYr}년 연간 당기순이익`;
-  }
-
-  // 전기이월 이익잉여금 (시스템 설정에 저장된 값)
+  // 전기이월 이익잉여금 (시스템 설정)
   let bsCarryOver = 0;
   try {
     const sysEl = document.getElementById('sys-carry-over');
@@ -3991,7 +3968,7 @@ function renderBS(d, forPrint=false) {
               </tr>
               <tr class="fs-item">
                 <td>이익잉여금</td>
-                <td style="font-size:11px;color:#888">${d.bsRetainedLabel||'전기 당기순이익'}</td>
+                <td style="font-size:11px;color:#888">누적 당기순이익</td>
                 <td>${fmtFS(d.bsRetained)}</td>
               </tr>
               ${d.bsCarryOver ? `
