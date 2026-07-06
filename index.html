@@ -1442,7 +1442,11 @@ function closeMo(id) {
   if(id==='mo-tax-up')   { document.getElementById('tax-pvw').style.display='none';  document.getElementById('tax-err').style.display='none';  document.getElementById('tax-fi').value='';  taxPvw=[]; }
   if(id==='mo-card-up')  { document.getElementById('card-pvw').style.display='none'; document.getElementById('card-err').style.display='none'; document.getElementById('card-fi').value=''; cardPvw=[]; }
 }
-document.querySelectorAll('.mo').forEach(o=>o.addEventListener('click',e=>{ if(e.target===o) o.classList.remove('open'); }));
+// 입력 모달은 overlay 클릭으로 닫히지 않음 (실수 방지)
+const NO_OVERLAY_CLOSE = new Set(['mo-l-add','mo-exp-add','mo-t-add','mo-c-add']);
+document.querySelectorAll('.mo').forEach(o => o.addEventListener('click', e => {
+  if(e.target === o && !NO_OVERLAY_CLOSE.has(o.id)) o.classList.remove('open');
+}));
  
 /* ═══════ TOAST ═══════ */
 function toast(msg, type='') {
