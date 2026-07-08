@@ -1443,7 +1443,7 @@ function closeMo(id) {
   if(id==='mo-card-up')  { document.getElementById('card-pvw').style.display='none'; document.getElementById('card-err').style.display='none'; document.getElementById('card-fi').value=''; cardPvw=[]; }
 }
 // 입력 모달은 overlay 클릭으로 닫히지 않음 (실수 방지)
-const NO_OVERLAY_CLOSE = new Set(['mo-l-add','mo-exp-add','mo-t-add','mo-c-add']);
+const NO_OVERLAY_CLOSE = new Set(['mo-l-add','mo-exp-add','mo-t-add','mo-c-add','mo-acct-add','mo-rule-add','mo-bank-up']);
 document.querySelectorAll('.mo').forEach(o => o.addEventListener('click', e => {
   if(e.target === o && !NO_OVERLAY_CLOSE.has(o.id)) o.classList.remove('open');
 }));
@@ -4498,7 +4498,10 @@ function switchStab(el) {
   const p=document.getElementById(tab); if(p){ p.style.display='block'; p.classList.add('active'); }
   if(tab==='sta-color') renderColorPrev();
 }
-function initSetAcct(){ renderAcctList(); renderRuleList(); }
+function initSetAcct(){
+  // 페이지 렌더링 후 DOM이 확실히 준비된 뒤 실행
+  setTimeout(() => { renderAcctList(); renderRuleList(); }, 0);
+}
 const typeLabel={both:'공통',income:'입금',expense:'출금·카드'};
 function renderAcctList() {
   const el=document.getElementById('acct-list-wrap'); if(!el) return;
