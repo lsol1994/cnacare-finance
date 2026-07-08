@@ -4491,16 +4491,32 @@ function renderMonth() {
  
 /* ═══════ SETTINGS - 공통 계정과목 ═══════ */
 function switchStab(el) {
-  const tab=el.dataset.tab;
-  document.querySelectorAll('.stab').forEach(t=>t.classList.remove('active'));
-  document.querySelectorAll('.spanel').forEach(p=>{ p.classList.remove('active'); p.style.display='none'; });
+  const tab = el.dataset.tab;
+  const page = el.closest('.page');
+  if(page) {
+    page.querySelectorAll('.stab').forEach(t => t.classList.remove('active'));
+    page.querySelectorAll('.spanel').forEach(p => { p.classList.remove('active'); p.style.display = 'none'; });
+  }
   el.classList.add('active');
-  const p=document.getElementById(tab); if(p){ p.style.display='block'; p.classList.add('active'); }
-  if(tab==='sta-color') renderColorPrev();
+  const p = document.getElementById(tab);
+  if(p){ p.style.display = 'block'; p.classList.add('active'); }
+  if(tab === 'sta-color') renderColorPrev();
 }
 function initSetAcct(){
-  // 페이지 렌더링 후 DOM이 확실히 준비된 뒤 실행
-  setTimeout(() => { renderAcctList(); renderRuleList(); }, 0);
+  setTimeout(() => {
+    // sta-list 패널 명시적으로 활성화
+    document.querySelectorAll('#p-set-acct .spanel').forEach(p => {
+      p.classList.remove('active');
+      p.style.display = 'none';
+    });
+    document.querySelectorAll('#p-set-acct .stab').forEach(t => t.classList.remove('active'));
+    const listPanel = document.getElementById('sta-list');
+    const listTab   = document.querySelector('.stab[data-tab="sta-list"]');
+    if(listPanel){ listPanel.style.display = 'block'; listPanel.classList.add('active'); }
+    if(listTab)  listTab.classList.add('active');
+    renderAcctList();
+    renderRuleList();
+  }, 0);
 }
 const typeLabel={both:'공통',income:'입금',expense:'출금·카드'};
 function renderAcctList() {
