@@ -829,22 +829,32 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
  
 <!-- 계정과목 설정 -->
 <div id="p-set-acct" class="page">
-  <div class="ph"><div><div class="ph-t">계정과목 설정</div><div class="ph-s">입출금·세금계산서·법인카드 공통 계정과목 및 자동분류 키워드</div></div></div>
-  <div class="stabs">
-    <div class="stab active" data-tab="sta-list" onclick="switchStab(this)">📋 계정과목 목록</div>
-    <div class="stab" data-tab="sta-rules" onclick="switchStab(this)">🔍 자동분류 규칙</div>
-    <div class="stab" data-tab="sta-color" onclick="switchStab(this)">🎨 색상 미리보기</div>
+  <div class="ph">
+    <div><div class="ph-t">계정과목 설정</div><div class="ph-s">입출금·세금계산서·법인카드 공통 계정과목 및 자동분류 키워드</div></div>
   </div>
-  <div id="sta-list" class="spanel active">
-    <div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn p sm" onclick="openAcctAdd()">＋ 계정과목 추가</button></div>
-    <div class="card" id="acct-list-wrap"></div>
+  <!-- 탭 버튼 -->
+  <div style="display:flex;gap:0;border-bottom:2px solid var(--bd);margin-bottom:14px">
+    <button id="acct-tab-btn-list"  onclick="showAcctTab('list')"  style="padding:8px 18px;font-size:13px;font-weight:600;border:none;cursor:pointer;background:none;border-bottom:2px solid var(--P);color:var(--P);margin-bottom:-2px">📋 계정과목 목록</button>
+    <button id="acct-tab-btn-rules" onclick="showAcctTab('rules')" style="padding:8px 18px;font-size:13px;font-weight:600;border:none;cursor:pointer;background:none;border-bottom:2px solid transparent;color:var(--t3);margin-bottom:-2px">🔍 자동분류 규칙</button>
+    <button id="acct-tab-btn-color" onclick="showAcctTab('color')" style="padding:8px 18px;font-size:13px;font-weight:600;border:none;cursor:pointer;background:none;border-bottom:2px solid transparent;color:var(--t3);margin-bottom:-2px">🎨 색상 미리보기</button>
   </div>
-  <div id="sta-rules" class="spanel">
-    <div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn p sm" onclick="openRuleAdd()">＋ 규칙 추가</button></div>
-    <div class="card" id="rule-list-wrap"></div>
+  <!-- 탭 콘텐츠 -->
+  <div id="acct-tab-list">
+    <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+      <button class="btn p sm" onclick="openAcctAdd()">＋ 계정과목 추가</button>
+    </div>
+    <div class="card" id="acct-list-wrap" style="min-height:80px"></div>
   </div>
-  <div id="sta-color" class="spanel">
-    <div class="card"><div class="ch"><span class="ct">전체 계정과목 배지</span></div><div id="color-prev" style="padding:13px;display:flex;flex-wrap:wrap;gap:7px"></div></div>
+  <div id="acct-tab-rules" style="display:none">
+    <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+      <button class="btn p sm" onclick="openRuleAdd()">＋ 규칙 추가</button>
+    </div>
+    <div class="card" id="rule-list-wrap" style="min-height:80px"></div>
+  </div>
+  <div id="acct-tab-color" style="display:none">
+    <div class="card"><div class="ch"><span class="ct">전체 계정과목 배지</span></div>
+      <div id="color-prev" style="padding:13px;display:flex;flex-wrap:wrap;gap:7px"></div>
+    </div>
     <div class="card" style="margin-top:11px"><div class="ch"><span class="ct">사용 가능한 색상</span></div>
       <div style="padding:13px;display:flex;flex-wrap:wrap;gap:7px">
         <span class="at ab0">파랑</span><span class="at ab1">초록</span><span class="at ab2">주황</span>
@@ -3790,7 +3800,7 @@ function calcFSData(prefix) {
 
   // ── 판관비: 입출금 출금 계정과목별 집계 ──
   const SGA_ACCTS = ['급여','복리후생비','보험료','인쇄비','소모품비','접대비',
-                     '임차료','통신비','차량유지비','외주비','세금과공과'];
+                     '임차료','통신비','차량유지비','외주비','세금과공과','지급수수료'];
   const sgaMap = {};
   ledPeriod
     .filter(t => t.type === 'expense')
@@ -4184,6 +4194,15 @@ function renderBS(d, forPrint=false) {
         자본 구성: 자본금 ${fmtFSRaw(d.bsCapital)} + 전기이월 ${fmtFSRaw(priorRetainedAdj)} + 당기순이익 ${fmtFSRaw(currentNetIncome)}${d.bsCarryOver?' + 전기이월(설정) '+fmtFSRaw(d.bsCarryOver):''}
         = ${fmtFSRaw(totalEquity)} 원
       </div>
+      ${!balanced ? `
+      <div style="padding:10px 14px;background:#fef3c7;border-top:1px solid #fde68a;font-size:11.5px;color:#92400e;line-height:1.8">
+        <strong>📋 대차 불일치 원인 체크리스트:</strong><br>
+        ${d.bsArWage === 0 ? '⚠️ <strong>외상매출금 = 0원</strong> — 지출결의서에 예상매출액이 입력되지 않았습니다. 지출결의서 → 급여 계정 → 예상매출액 입력 필요<br>' : ''}
+        ${d.bsRetained > 0 && totalAssets > liabEquity ? '⚠️ <strong>이익잉여금 과소</strong> — 누적 당기순이익이 현금잔액 증가분보다 작습니다. 자본금 이외 입금 항목 확인 필요<br>' : ''}
+        ${d.bsRetained < 0 && totalAssets < liabEquity ? '⚠️ <strong>자산 과소</strong> — 미수수익(세금계산서 미완료 매출)이 반영되지 않았거나 외상매출금이 누락되었습니다.<br>' : ''}
+        <strong>차액 ${fmtFSRaw(Math.abs(diff))}원</strong> = 가능 원인: ①외상매출금 미입력 ②미수수익 미반영 ③계정 오분류<br>
+        → 지출결의서 탭 &gt; 💰 외상매출금 현황에서 예상매출액 확인
+      </div>` : ''}
     </div>
   </div>`;
 }
@@ -4490,38 +4509,41 @@ function renderMonth() {
 }
  
 /* ═══════ SETTINGS - 공통 계정과목 ═══════ */
-function switchStab(el) {
-  const tab  = el.dataset.tab;
-  const page = el.closest('.page');
-  if(page) {
-    page.querySelectorAll('.stab').forEach(t => t.classList.remove('active'));
-    page.querySelectorAll('.spanel').forEach(p => {
-      p.classList.remove('active');
-      p.style.removeProperty('display');  // 인라인 스타일 제거
-    });
-  }
-  el.classList.add('active');
-  const p = document.getElementById(tab);
-  if(p){ p.classList.add('active'); p.style.removeProperty('display'); }
-  if(tab === 'sta-color') renderColorPrev();
+/* ══ 계정과목 탭 (spanel 의존성 완전 제거) ══ */
+function showAcctTab(tab) {
+  // 모든 탭 콘텐츠 숨기기
+  ['list','rules','color'].forEach(t => {
+    const el = document.getElementById('acct-tab-' + t);
+    if(el) el.style.display = 'none';
+  });
+  // 모든 탭 버튼 비활성화
+  ['list','rules','color'].forEach(t => {
+    const btn = document.getElementById('acct-tab-btn-' + t);
+    if(btn) {
+      btn.style.borderBottomColor = 'transparent';
+      btn.style.color = 'var(--t3)';
+    }
+  });
+  // 선택 탭 표시
+  const content = document.getElementById('acct-tab-' + tab);
+  if(content) content.style.display = '';
+  const btn = document.getElementById('acct-tab-btn-' + tab);
+  if(btn) { btn.style.borderBottomColor = 'var(--P)'; btn.style.color = 'var(--P)'; }
+  // 탭별 렌더
+  if(tab === 'list')  renderAcctList();
+  if(tab === 'rules') renderRuleList();
+  if(tab === 'color') renderColorPrev();
 }
-function initSetAcct(){
-  setTimeout(() => {
-    // 인라인 스타일 제거 후 CSS 클래스로만 표시 제어
-    document.querySelectorAll('#p-set-acct .spanel').forEach(p => {
-      p.classList.remove('active');
-      p.style.removeProperty('display');  // 인라인 스타일 제거 (CSS 우선 적용)
-    });
-    document.querySelectorAll('#p-set-acct .stab').forEach(t => t.classList.remove('active'));
 
-    const listPanel = document.getElementById('sta-list');
-    const listTab   = document.querySelector('.stab[data-tab="sta-list"]');
-    if(listPanel){ listPanel.classList.add('active'); listPanel.style.removeProperty('display'); }
-    if(listTab)   listTab.classList.add('active');
+function initSetAcct() {
+  showAcctTab('list');
+}
 
-    renderAcctList();
-    renderRuleList();
-  }, 0);
+// 구버전 switchStab 하위호환 (다른 곳에서 호출될 경우 대비)
+function switchStab(el) {
+  const tab = el.dataset.tab || '';
+  const map = {'sta-list':'list','sta-rules':'rules','sta-color':'color'};
+  showAcctTab(map[tab] || tab);
 }
 const typeLabel={both:'공통',income:'입금',expense:'출금·카드'};
 function renderAcctList() {
