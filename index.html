@@ -3170,6 +3170,69 @@ function setExpTab(tab) {
   if(tab==='ar') renderExpAR();
 }
 
+/* ── 환자명/간병인명 매칭 헬퍼 ──
+   지출결의서 제목: "간병비 입금(환자: 강안순)" 형태에서 환자명 추출
+   간병인명 = 지출결의서의 수취인(payee)
+   입출금 매출액 내역: "타행IB 강안순-장순녀" 형태에서 두 이름 추출하여 대조 */
+function extractPatientName(title) {
+  if(!title) return '';
+  const m = title.match(/환자\s*[:：]?\s*([가-힣]{2,10})\s*\)?/);
+  return m ? m[1].trim() : '';
+}
+function extractLedgerNamePair(desc) {
+  if(!desc) return null;
+  const m = desc.match(/([가-힣]{2,8})\s*-\s*([가-힣]{2,8})/);
+  return m ? [m[1].trim(), m[2].trim()] : null;
+}
+/* 급여 지출건(환자·간병인)과 실입금 매출액을 이름 기준으로 매칭 집계 */
+function computeARMatching() {
+  const payReqs = expReqs.filter(t => t.acct==='급여' && Number(t.expectedRev||0) > 0);
+  const incomeRows = ledger.filter(t => t.type==='income' && t.acct==='매출액');
+
+  // 그룹 키: 환자명|간병인명
+  const groups = {}; // key -> { patient, caregiver, expectedTotal, payCount, payIds:[], receivedTotal, recvCount, recvDates:[], recvRows:[] }
+  payReqs.forEach(t => {
+    const patient = extractPatientName(t.title);
+    const caregiver = (t.payee||'').trim();
+    const key = `${patient}|${caregiver}`;
+    if(!groups[key]) groups[key] = { patient, caregiver, expectedTotal:0, payCount:0, payIds:[], receivedTotal:0, recvCount:0, recvDates:[], recvRows:[] };
+    groups[key].expectedTotal += Number(t.expectedRev||0);
+    groups[key].payCount += 1;
+    groups[key].payIds.push(t.id);
+  });
+
+  // 매칭 안 된(제목에서 환자명을 못 뽑은) 건은 별도 표시를 위해 unmatched 리스트도 유지
+  const unmatchedPay = payReqs.filter(t => !extractPatientName(t.title));
+
+  // 입금 내역을 이름쌍(양방향)으로 매칭
+  incomeRows.forEach(t => {
+    const pair = extractLedgerNamePair(t.desc);
+    if(!pair) return;
+    const [n1,n2] = pair;
+    // groups 중 (patient,caregiver)가 (n1,n2) 또는 (n2,n1)과 일치하는 항목 탐색
+    let matched = null;
+    Object.values(groups).forEach(g => {
+      if((g.patient===n1 && g.caregiver===n2) || (g.patient===n2 && g.caregiver===n1)) matched = g;
+    });
+    if(matched) {
+      matched.receivedTotal += Number(t.amount||0);
+      matched.recvCount += 1;
+      matched.recvDates.push(t.date);
+      matched.recvRows.push(t);
+    }
+  });
+
+  const rows = Object.values(groups).map(g => {
+    const diff = g.expectedTotal - g.receivedTotal;
+    let status = '미입금';
+    if(g.receivedTotal >= g.expectedTotal && g.expectedTotal>0) status = '완납';
+    else if(g.receivedTotal > 0) status = '부분입금';
+    return { ...g, diff, status, lastRecvDate: g.recvDates.sort().slice(-1)[0]||'' };
+  }).sort((a,b) => (b.diff) - (a.diff));
+
+  return { rows, unmatchedPay, totalExpected: payReqs.reduce((s,t)=>s+Number(t.expectedRev||0),0), totalReceived: incomeRows.reduce((s,t)=>s+Number(t.amount||0),0) };
+}
+
 /* 외상매출금 현황 렌더 */
 function renderExpAR() {
   // 급여 지급건만 예상매출액으로 집계
@@ -3185,12 +3248,62 @@ function renderExpAR() {
     .filter(t => t.acct==='급여' && Number(t.expectedRev||0) > 0)
     .sort((a,b) => b.payDate.localeCompare(a.payDate));
 
+  const arMatch = computeARMatching();
+  const matchStatusColor = { '완납':'var(--G)', '부분입금':'var(--O)', '미입금':'var(--R)' };
+  const matchStatusBg    = { '완납':'#F0FDF4', '부분입금':'#FFF7ED', '미입금':'#FEF2F2' };
+
   const html = `
     <!-- 요약 카드 -->
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px">
       <div class="sc"><div class="sc-l">예상매출액 합계</div><div class="sc-v bal">₩${fmt(totalExpected)}</div></div>
       <div class="sc"><div class="sc-l">실 입금 매출액</div><div class="sc-v inc">₩${fmt(totalReceived)}</div></div>
       <div class="sc"><div class="sc-l" style="color:var(--O);font-weight:700">외상매출금 (미수금)</div><div class="sc-v" style="color:var(--O);font-size:18px;font-weight:700">₩${fmt(netAR)}</div></div>
+    </div>
+
+    <!-- 환자·간병인 기준 입금 대조표 (핵심) -->
+    <div class="card" style="margin-bottom:12px">
+      <div class="ch" style="display:flex;justify-content:space-between;align-items:center">
+        <span class="ct">🔎 환자·간병인별 입금 대조 — 지급한 건에 대해 매출처 입금이 확인되는지 비교</span>
+        <div style="display:flex;gap:6px">
+          <button class="btn sm" onclick="arExport('csv')">CSV↓</button>
+          <button class="btn sm p" onclick="arExport('xl')">엑셀↓</button>
+        </div>
+      </div>
+      <div class="tw"><table>
+        <thead><tr>
+          <th>환자명</th>
+          <th>간병인명(수취인)</th>
+          <th style="width:60px;text-align:center">지급건수</th>
+          <th style="width:120px;text-align:right">지급 예상매출액(원)</th>
+          <th style="width:60px;text-align:center">입금건수</th>
+          <th style="width:120px;text-align:right">실 입금액(원)</th>
+          <th style="width:100px;text-align:right">차액(원)</th>
+          <th style="width:90px">최근 입금일</th>
+          <th style="width:76px;text-align:center">상태</th>
+        </tr></thead>
+        <tbody>
+          ${arMatch.rows.length ? arMatch.rows.map(g => `
+            <tr style="background:${matchStatusBg[g.status]}">
+              <td style="font-weight:600">${g.patient||'<span style=\"color:var(--tm)\">(미확인)</span>'}</td>
+              <td>${g.caregiver||'-'}</td>
+              <td style="text-align:center">${g.payCount}</td>
+              <td class="nm" style="color:var(--P);font-weight:600">${fmt(g.expectedTotal)}</td>
+              <td style="text-align:center">${g.recvCount}</td>
+              <td class="nm inc">${fmt(g.receivedTotal)}</td>
+              <td class="nm" style="color:${g.diff>0?'var(--R)':'var(--G)'};font-weight:700">${fmt(g.diff)}</td>
+              <td class="dn">${g.lastRecvDate||'-'}</td>
+              <td style="text-align:center"><span style="font-weight:700;color:${matchStatusColor[g.status]}">${g.status}</span></td>
+            </tr>`).join('') : '<tr><td colspan="9" style="text-align:center;color:var(--tm);padding:20px">급여 지급건이 없습니다</td></tr>'}
+        </tbody>
+      </table></div>
+      ${arMatch.unmatchedPay.length ? `
+      <div style="padding:10px 14px;font-size:12px;color:var(--O);background:#FFF7ED;border-top:1px solid var(--bd)">
+        ⚠ 제목에서 환자명을 인식하지 못한 지급건 ${arMatch.unmatchedPay.length}건이 있습니다. 제목을 <b>간병비 입금(환자: 이름)</b> 형식으로 입력하면 자동으로 대조됩니다.
+        <br>${arMatch.unmatchedPay.map(t=>`「${t.title}」`).join(', ')}
+      </div>` : ''}
+      <div style="padding:8px 14px;font-size:11.5px;color:var(--t3);border-top:1px solid var(--bd)">
+        매칭 방식: 지출결의서 제목의 <b>환자명</b>과 수취인(<b>간병인명</b>)을, 입출금 내역 매출액 계정의 내용(예: 타행IB 환자명-간병인명)에서 추출한 이름과 대조합니다.
+      </div>
     </div>
 
     <!-- 지출결의서별 예상매출액 목록 -->
@@ -3370,6 +3483,58 @@ function expExp(fmt2) {
     const wb=XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb,ws,'지출결의서');
     XLSX.writeFile(wb,'지출결의서.xlsx'); toast('엑셀 다운로드','ok');
+  }
+}
+
+/* 외상매출금 현황 내보내기 — 매칭 요약 + 지급내역(우리 협회) + 입금내역(업체) 모두 포함 */
+function arExport(fmt2) {
+  const { rows: matchRows, unmatchedPay } = computeARMatching();
+  const payReqs = expReqs.filter(t => t.acct==='급여' && Number(t.expectedRev||0) > 0)
+    .sort((a,b) => b.payDate.localeCompare(a.payDate));
+  const incomeRows = ledger.filter(t => t.type==='income' && t.acct==='매출액')
+    .sort((a,b) => b.date.localeCompare(a.date));
+
+  if(!matchRows.length && !payReqs.length && !incomeRows.length){
+    toast('내보낼 데이터가 없습니다.','err'); return;
+  }
+
+  const matchHdr = ['환자명','간병인명(수취인)','지급건수','지급 예상매출액(원)','입금건수','실입금액(원)','차액(원)','최근입금일','상태'];
+  const matchData = matchRows.map(g => [g.patient||'(미확인)', g.caregiver, g.payCount, g.expectedTotal, g.recvCount, g.receivedTotal, g.diff, g.lastRecvDate||'', g.status]);
+
+  const payHdr = ['지급일자','기안일자','제목','환자명(추출)','수취인(간병인)','간병일수','지급금액(원)','예상매출액(원)','업체','상태'];
+  const payData = payReqs.map(t => [t.payDate, t.draftDate, t.title, extractPatientName(t.title)||'', t.payee, t.careDays||'', t.amount, t.expectedRev||0, t.client||'', t.status]);
+
+  const recvHdr = ['거래일자','내용','매출처','입금액(원)'];
+  const recvData = incomeRows.map(t => [t.date, t.desc, t.partner||'', t.amount]);
+
+  if(fmt2==='csv'){
+    const esc = v => typeof v==='string' && (v.includes(',')||v.includes('"')) ? `"${v.replace(/"/g,'""')}"` : v;
+    const section = (title,hdr,data) => [title, hdr.join(','), ...data.map(r=>r.map(esc).join(','))].join('\n');
+    const out = [
+      section('■ 환자·간병인별 입금 대조 요약', matchHdr, matchData),
+      '',
+      section('■ 지급 내역 (우리 협회 → 간병인 급여)', payHdr, payData),
+      '',
+      section('■ 입금 내역 (업체 → 우리 협회 매출)', recvHdr, recvData),
+    ].join('\n');
+    dlBlob('\uFEFF'+out, 'text/csv', '외상매출금_현황.csv');
+    toast('CSV 다운로드','ok');
+  } else {
+    const wb = XLSX.utils.book_new();
+    const ws1 = XLSX.utils.aoa_to_sheet([matchHdr, ...matchData]);
+    ws1['!cols'] = [{wch:12},{wch:14},{wch:10},{wch:16},{wch:10},{wch:14},{wch:12},{wch:12},{wch:10}];
+    XLSX.utils.book_append_sheet(wb, ws1, '입금대조요약');
+
+    const ws2 = XLSX.utils.aoa_to_sheet([payHdr, ...payData]);
+    ws2['!cols'] = [{wch:12},{wch:12},{wch:26},{wch:12},{wch:14},{wch:10},{wch:13},{wch:14},{wch:14},{wch:10}];
+    XLSX.utils.book_append_sheet(wb, ws2, '지급내역(협회)');
+
+    const ws3 = XLSX.utils.aoa_to_sheet([recvHdr, ...recvData]);
+    ws3['!cols'] = [{wch:12},{wch:32},{wch:16},{wch:14}];
+    XLSX.utils.book_append_sheet(wb, ws3, '입금내역(업체)');
+
+    XLSX.writeFile(wb, '외상매출금_현황.xlsx');
+    toast('엑셀 다운로드','ok');
   }
 }
  
