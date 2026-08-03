@@ -3171,30 +3171,50 @@ function setExpTab(tab) {
 }
 
 /* ── 환자명/간병인명 매칭 헬퍼 ──
-   지출결의서 제목: "간병비 입금(환자: 강안순)" 형태에서 환자명 추출
+   신뢰 패턴: "간병비 입금" 또는 "간병비 지급" 뒤에 이어지는 "환자 이름"에서 환자명 추출
+   - 환자와 이름 사이 콜론(:/：) 유무 모두 지원, 공백 유무 모두 지원
+   - 이름 끝에 붙는 존칭(님/분/씨) 제거
+   - 한글 이름과 영문 이름(예: JIN ZHENGUO) 모두 지원
    간병인명 = 지출결의서의 수취인(payee)
-   입출금 매출액 내역: "타행IB 강안순-장순녀" 형태에서 두 이름 추출하여 대조 */
+   입출금 매출액 내역: "타행IB 강안순-장순녀" 형태에서 두 이름 추출하여 대조 (영문도 지원)
+   매칭 시 대소문자/공백 차이는 무시(정규화)하여 같은 환자·간병인 건은 합산 집계됨 */
+const AR_NAME_PAT = '(?:[가-힣]{2,12}|[A-Za-z]{2,}(?:\\s+[A-Za-z]+)*)';
+function normArName(s) {
+  return (s||'').trim().replace(/\s+/g,' ').toUpperCase();
+}
 function extractPatientName(title) {
   if(!title) return '';
-  const m = title.match(/환자\s*[:：]?\s*([가-힣]{2,10})\s*\)?/);
-  return m ? m[1].trim() : '';
+  // 우선 패턴: "간병비 (입금|지급) ... 환자 [님/분]? [:：]? 이름"
+  const primary  = new RegExp('간병비.{0,6}(?:입금|지급).{0,15}환자[님분]?\\s*[:：]?\\s*(' + AR_NAME_PAT + ')');
+  // 보조 패턴: 위 문구가 없어도 "환자" 표기만으로 시도
+  const fallback = new RegExp('환자[님분]?\\s*[:：]?\\s*(' + AR_NAME_PAT + ')');
+  const m = title.match(primary) || title.match(fallback);
+  if(!m) return '';
+  // 이름 뒤에 붙은 존칭 제거 후 공백 정리
+  return m[1].trim().replace(/\s+/g,' ').replace(/(님|분|씨)$/,'');
+}
+/* 입출금 내용 앞에 붙는 은행 거래채널 표기(타행IB, 모바일 등) 제거 후 이름쌍 추출 대비 */
+function stripBankChannelPrefix(desc) {
+  return (desc||'').replace(/^(타행\s*(IB|CMS|이체|인터넷뱅킹|모바일뱅킹|자동이체)|인터넷\s*뱅킹|모바일\s*뱅킹|모바일|폰\s*뱅킹|텔레\s*뱅킹|ATM|CD|창구|대체)\s*/i, '').trim();
 }
 function extractLedgerNamePair(desc) {
   if(!desc) return null;
-  const m = desc.match(/([가-힣]{2,8})\s*-\s*([가-힣]{2,8})/);
-  return m ? [m[1].trim(), m[2].trim()] : null;
+  const cleaned = stripBankChannelPrefix(desc);
+  const re = new RegExp('(' + AR_NAME_PAT + ')\\s*-\\s*(' + AR_NAME_PAT + ')');
+  const m = cleaned.match(re);
+  return m ? [m[1].trim().replace(/\s+/g,' '), m[2].trim().replace(/\s+/g,' ')] : null;
 }
 /* 급여 지출건(환자·간병인)과 실입금 매출액을 이름 기준으로 매칭 집계 */
 function computeARMatching() {
   const payReqs = expReqs.filter(t => t.acct==='급여' && Number(t.expectedRev||0) > 0);
   const incomeRows = ledger.filter(t => t.type==='income' && t.acct==='매출액');
 
-  // 그룹 키: 환자명|간병인명
+  // 그룹 키: 정규화된 환자명|간병인명 (대소문자·공백 차이는 같은 건으로 합산)
   const groups = {}; // key -> { patient, caregiver, expectedTotal, payCount, payIds:[], receivedTotal, recvCount, recvDates:[], recvRows:[] }
   payReqs.forEach(t => {
     const patient = extractPatientName(t.title);
     const caregiver = (t.payee||'').trim();
-    const key = `${patient}|${caregiver}`;
+    const key = `${normArName(patient)}|${normArName(caregiver)}`;
     if(!groups[key]) groups[key] = { patient, caregiver, expectedTotal:0, payCount:0, payIds:[], receivedTotal:0, recvCount:0, recvDates:[], recvRows:[] };
     groups[key].expectedTotal += Number(t.expectedRev||0);
     groups[key].payCount += 1;
@@ -3204,15 +3224,16 @@ function computeARMatching() {
   // 매칭 안 된(제목에서 환자명을 못 뽑은) 건은 별도 표시를 위해 unmatched 리스트도 유지
   const unmatchedPay = payReqs.filter(t => !extractPatientName(t.title));
 
-  // 입금 내역을 이름쌍(양방향)으로 매칭
+  // 입금 내역을 이름쌍(양방향, 정규화 비교)으로 매칭
   incomeRows.forEach(t => {
     const pair = extractLedgerNamePair(t.desc);
     if(!pair) return;
-    const [n1,n2] = pair;
+    const n1 = normArName(pair[0]), n2 = normArName(pair[1]);
     // groups 중 (patient,caregiver)가 (n1,n2) 또는 (n2,n1)과 일치하는 항목 탐색
     let matched = null;
     Object.values(groups).forEach(g => {
-      if((g.patient===n1 && g.caregiver===n2) || (g.patient===n2 && g.caregiver===n1)) matched = g;
+      const gp = normArName(g.patient), gc = normArName(g.caregiver);
+      if((gp===n1 && gc===n2) || (gp===n2 && gc===n1)) matched = g;
     });
     if(matched) {
       matched.receivedTotal += Number(t.amount||0);
