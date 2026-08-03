@@ -2942,7 +2942,8 @@ function openExpCopy(id) {
   document.getElementById('ef-status').value     = '대기';
   document.getElementById('ef-note').value       = t.note   || '';
   const revEl = document.getElementById('ef-expected-rev');
-  if(revEl) { revEl.value = t?.expectedRev||''; revEl._manualEdit = !!(t?.expectedRev); }
+  // 복사본은 항상 자동계산 상태로 시작 (이전 값이 고정되어 금액을 바꿔도 재계산되지 않는 문제 방지)
+  if(revEl) revEl._manualEdit = false;
   const daysEl = document.getElementById('ef-care-days');
   if(daysEl) daysEl.value = t?.careDays||'';
   const feeEl = document.getElementById('ef-fee-total');
@@ -2951,6 +2952,7 @@ function openExpCopy(id) {
   if(clientEl) clientEl.value = t?.client||'';
   syncDropdowns();
   document.getElementById('ef-acct').value = t.acct || '';
+  calcExpectedRev(); // 복사된 금액·간병일수 기준으로 예상매출액을 즉시 재계산 (고정 방지)
   const sec = document.getElementById('ef-rev-section');
   if(sec) sec.style.display = (t.acct==='급여') ? '' : 'none';
   openMo('mo-exp-add');
