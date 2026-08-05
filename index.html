@@ -716,6 +716,17 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
       <button class="btn p" onclick="printFS('all')">📄 재무제표 통합 인쇄</button>
     </div>
   </div>
+  <!-- 탭: 손익계산서 / 현재순이익 -->
+  <div class="no-print" style="display:flex;gap:0;border-bottom:2px solid var(--bd);margin-bottom:12px">
+    <button id="is-tab-is" onclick="setIsTab('is')"
+      style="padding:8px 18px;font-size:13px;font-weight:600;border:none;background:none;cursor:pointer;border-bottom:2px solid var(--P);color:var(--P);margin-bottom:-2px">
+      📑 손익계산서
+    </button>
+    <button id="is-tab-current" onclick="setIsTab('current')"
+      style="padding:8px 18px;font-size:13px;font-weight:600;border:none;background:none;cursor:pointer;border-bottom:2px solid transparent;color:var(--t3);margin-bottom:-2px">
+      💵 현재순이익
+    </button>
+  </div>
   <div id="fs-filter-wrap"></div>
   <div id="fs-report-body"></div>
 </div>
@@ -3282,6 +3293,142 @@ function computeARMatching() {
   return { rows, unmatchedPay, totalExpected: payReqs.reduce((s,t)=>s+Number(t.expectedRev||0),0), totalReceived: incomeRows.reduce((s,t)=>s+Number(t.amount||0),0) };
 }
 
+/* ══════════════════════════════
+   현재순이익: 선지급된 급여 중 매칭되는 매출액이
+   들어오지 않은 건은 제외하고, 실제 입금된 비율만큼만
+   급여비용으로 인정하여 재계산한 순이익
+   ══════════════════════════════
+   - 환자·간병인 그룹의 (실입금액/예상매출액) 비율을 구해
+     해당 그룹에 속한 급여 지급건의 지급금액에 그대로 곱해 인정액 산출
+   - 예상매출액 자체가 없는(AR 추적 대상이 아닌) 급여건은 매칭 로직 대상이 아니므로 전액 인정
+   - 조회 기간(d.start~d.end)의 지급일자 기준 급여 지출결의서만 집계 */
+function calcMatchedIncome(d) {
+  const { rows: arRows } = computeARMatching();
+
+  // 성공적으로 환자명이 인식된 그룹의 매칭비율 lookup (환자|간병인 키)
+  const ratioMap = {};
+  arRows.forEach(g => {
+    if(!g.patient) return; // 미인식 그룹은 개별 id로 아래에서 별도 조회
+    const key = `${patientMatchKey(g.patient)}|${caregiverMatchKey(g.caregiver)}`;
+    ratioMap[key] = g.expectedTotal>0 ? Math.min(1, g.receivedTotal/g.expectedTotal) : 0;
+  });
+
+  const wagePayInPeriod = expReqs.filter(t => t.acct==='급여' && t.payDate>=d.start && t.payDate<=d.end);
+
+  let matchedWage = 0, excludedWage = 0;
+  const detail = [];
+  wagePayInPeriod.forEach(t => {
+    const amt = Number(t.amount||0);
+    let ratio;
+    if(!Number(t.expectedRev||0)) {
+      ratio = 1; // AR 추적 대상이 아닌 급여건(예상매출액 미입력) → 매칭 로직 미적용, 전액 인정
+    } else {
+      const patient = extractPatientName(t.title);
+      if(patient) {
+        const key = `${patientMatchKey(patient)}|${caregiverMatchKey(t.payee)}`;
+        ratio = ratioMap[key] !== undefined ? ratioMap[key] : 0;
+      } else {
+        // 환자명 미인식 건은 computeARMatching에서 건별 고유 그룹으로 처리되므로 그 결과를 그대로 조회
+        const g = arRows.find(x => x.payIds && x.payIds.includes(t.id));
+        ratio = g ? (g.expectedTotal>0 ? Math.min(1, g.receivedTotal/g.expectedTotal) : 0) : 0;
+      }
+    }
+    const matchedAmt  = Math.round(amt * ratio);
+    const excludedAmt = amt - matchedAmt;
+    matchedWage  += matchedAmt;
+    excludedWage += excludedAmt;
+    detail.push({ id:t.id, payDate:t.payDate, title:t.title, payee:t.payee, amount:amt, ratio, matchedAmt, excludedAmt });
+  });
+
+  const sgaMapAdj = { ...d.sgaMap, 급여: matchedWage };
+  const totalSGAAdj = Object.values(sgaMapAdj).reduce((s,v)=>s+v, 0);
+  const opProfitAdj = d.grossProfit - totalSGAAdj;
+  const netIncomeAdj = opProfitAdj + d.nonOp;
+
+  return {
+    sgaMap: sgaMapAdj, totalSGA: totalSGAAdj, opProfit: opProfitAdj, netIncome: netIncomeAdj,
+    originalWage: d.sgaMap['급여']||0, matchedWage, excludedWage,
+    originalTotalSGA: d.totalSGA, originalOpProfit: d.opProfit, originalNetIncome: d.netIncome,
+    detail: detail.sort((a,b)=>b.excludedAmt-a.excludedAmt),
+  };
+}
+
+/* ══════════════════════════════
+   현재순이익 렌더링
+   ══════════════════════════════ */
+function renderCurrentProfit(d) {
+  const m = calcMatchedIncome(d);
+  const fmtRaw = n => Number(n||0).toLocaleString('ko-KR');
+
+  const sgaRows = Object.entries(m.sgaMap).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]);
+
+  return `<div class="fs-wrap">
+    ${fsHeader('현재순이익','선지급 급여 중 매출 미확인분을 제외한 실질 순이익', d.label)}
+
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px">
+      <div class="sc"><div class="sc-l">회계기준 당기순이익</div><div class="sc-v" style="color:var(--t2)">₩${fmtRaw(m.originalNetIncome)}</div></div>
+      <div class="sc"><div class="sc-l" style="color:var(--O);font-weight:700">제외된 미매칭 급여</div><div class="sc-v" style="color:var(--O)">₩${fmtRaw(m.excludedWage)}</div></div>
+      <div class="sc"><div class="sc-l" style="color:var(--P);font-weight:700">현재순이익</div><div class="sc-v" style="color:var(--P);font-size:18px;font-weight:700">₩${fmtRaw(m.netIncome)}</div></div>
+    </div>
+
+    <div class="card" style="margin-bottom:12px">
+      <div class="ch"><span class="ct">📊 조정 내역</span></div>
+      <div class="tw"><table>
+        <thead><tr><th>항목</th><th style="text-align:right;width:140px">회계기준(원)</th><th style="text-align:right;width:140px">현재순이익 기준(원)</th></tr></thead>
+        <tbody>
+          <tr><td>매출액</td><td class="nm">${fmtRaw(d.totalRev)}</td><td class="nm">${fmtRaw(d.totalRev)}</td></tr>
+          <tr style="background:#FFF7ED">
+            <td>급여</td>
+            <td class="nm">${fmtRaw(m.originalWage)}</td>
+            <td class="nm" style="color:var(--O);font-weight:700">${fmtRaw(m.matchedWage)}</td>
+          </tr>
+          ${sgaRows.filter(([k])=>k!=='급여').map(([k,v]) => `<tr><td>${k}</td><td class="nm">${fmtRaw(v)}</td><td class="nm">${fmtRaw(v)}</td></tr>`).join('')}
+          <tr style="font-weight:700;background:var(--sf2)">
+            <td>판관비 합계</td><td class="nm">${fmtRaw(m.originalTotalSGA)}</td><td class="nm">${fmtRaw(m.totalSGA)}</td>
+          </tr>
+          <tr style="font-weight:700">
+            <td>영업이익</td><td class="nm">${fmtRaw(m.originalOpProfit)}</td><td class="nm">${fmtRaw(m.opProfit)}</td>
+          </tr>
+          <tr><td>영업외손익</td><td class="nm">${fmtRaw(d.nonOp)}</td><td class="nm">${fmtRaw(d.nonOp)}</td></tr>
+          <tr style="font-weight:700;background:var(--PU);color:var(--P)">
+            <td>★ 순이익</td><td class="nm">${fmtRaw(m.originalNetIncome)}</td><td class="nm">${fmtRaw(m.netIncome)}</td>
+          </tr>
+        </tbody>
+      </table></div>
+    </div>
+
+    <div class="card">
+      <div class="ch"><span class="ct">📋 급여 지급건별 매칭 인정 내역 (${d.label})</span></div>
+      <div class="tw"><table>
+        <thead><tr>
+          <th style="width:84px">지급일자</th>
+          <th>제목</th>
+          <th style="width:90px">수취인</th>
+          <th style="width:100px;text-align:right">지급액(원)</th>
+          <th style="width:70px;text-align:center">매칭률</th>
+          <th style="width:100px;text-align:right">인정액(원)</th>
+          <th style="width:100px;text-align:right">제외액(원)</th>
+        </tr></thead>
+        <tbody>
+          ${m.detail.length ? m.detail.map(x => `
+            <tr style="${x.excludedAmt>0?'background:#FEF2F2':''}">
+              <td class="dn">${x.payDate}</td>
+              <td style="font-size:12.5px">${x.title}</td>
+              <td style="font-size:12px">${x.payee}</td>
+              <td class="nm">${fmtRaw(x.amount)}</td>
+              <td style="text-align:center;font-weight:600;color:${x.ratio>=1?'var(--G)':x.ratio>0?'var(--O)':'var(--R)'}">${Math.round(x.ratio*100)}%</td>
+              <td class="nm" style="color:var(--G)">${fmtRaw(x.matchedAmt)}</td>
+              <td class="nm" style="color:${x.excludedAmt>0?'var(--R)':'var(--t3)'}">${x.excludedAmt>0?fmtRaw(x.excludedAmt):'-'}</td>
+            </tr>`).join('') : '<tr><td colspan="7" style="text-align:center;color:var(--tm);padding:20px">해당 기간 급여 지급건이 없습니다</td></tr>'}
+        </tbody>
+      </table></div>
+      <div style="padding:8px 14px;font-size:11.5px;color:var(--t3);border-top:1px solid var(--bd)">
+        매칭률 = 환자·간병인별 실 입금액 ÷ 예상매출액 (최대 100%). 예상매출액을 입력하지 않은 급여건은 매칭 대상이 아니므로 전액(100%) 인정됩니다.
+      </div>
+    </div>
+  </div>`;
+}
+
 /* 외상매출금 현황 렌더 */
 function renderExpAR() {
   // 급여 지급건만 예상매출액으로 집계
@@ -3444,7 +3591,7 @@ function renderExp() {
   if(tb) tb.innerHTML=rows.map(t=>`<tr>
     <td class="dn" style="color:var(--R);font-weight:600">${t.payDate}</td>
     <td class="dn">${t.draftDate}</td>
-    <td><div style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;font-weight:500;cursor:pointer" onclick="openExpView(${t.id})">${t.title}</div></td>
+    <td><div style="overflow-wrap:break-word;word-break:keep-all;line-height:1.4;font-size:12.5px;font-weight:500;cursor:pointer" onclick="openExpView(${t.id})">${t.title}</div></td>
     <td style="font-size:12px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.payee}</td>
     <td><span class="at ${acctColor(t.acct)}">${t.acct||'미분류'}</span></td>
     <td class="nm exp">${fmt(t.amount)}</td>
@@ -4642,6 +4789,16 @@ function renderTB(d, forPrint=false) {
 
 
 /* ── 통합 렌더 라우터 ── */
+let isTab = 'is'; // 'is' | 'current' — 손익계산서 페이지 내부 탭 상태
+function setIsTab(tab) {
+  isTab = tab;
+  const bIs = document.getElementById('is-tab-is');
+  const bCur = document.getElementById('is-tab-current');
+  if(bIs)  { bIs.style.borderBottomColor  = tab==='is'      ? 'var(--P)' : 'transparent'; bIs.style.color  = tab==='is'      ? 'var(--P)' : 'var(--t3)'; }
+  if(bCur) { bCur.style.borderBottomColor = tab==='current' ? 'var(--P)' : 'transparent'; bCur.style.color = tab==='current' ? 'var(--P)' : 'var(--t3)'; }
+  renderFS('fs');
+}
+
 function renderFS(prefix) {
   const wrap = document.getElementById(`${prefix}-filter-wrap`);
   if(wrap && !wrap.hasChildNodes()) wrap.innerHTML = makeFsFilter(prefix);
@@ -4650,7 +4807,7 @@ function renderFS(prefix) {
   const body = document.getElementById(`${prefix}-report-body`);
   if(!body) return;
 
-  if(prefix==='fs') body.innerHTML = renderIS(d);
+  if(prefix==='fs') body.innerHTML = (isTab==='current') ? renderCurrentProfit(d) : renderIS(d);
   else if(prefix==='bs') body.innerHTML = renderBS(d);
   else if(prefix==='tb') body.innerHTML = renderTB(d);
 }
