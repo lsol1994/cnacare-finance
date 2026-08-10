@@ -498,7 +498,7 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
       <select class="fs" id="lf-ac" onchange="renderL()" style="width:126px"><option value="">계정과목 전체</option></select>
       <input class="fi" id="lf-q" placeholder="내용 검색..." oninput="renderL()">
     </div>
-    <div class="tw"><table><thead><tr><th style="width:84px">거래일자</th><th style="width:46px">구분</th><th>내용/적요</th><th style="width:106px;text-align:right">출금(원)</th><th style="width:106px;text-align:right">입금(원)</th><th style="width:106px;text-align:right">잔액(원)</th><th style="width:126px">계정과목</th><th style="width:86px">계좌</th><th style="width:52px;text-align:center">관리</th></tr></thead><tbody id="ltb"></tbody></table></div>
+    <div class="tw"><table style="table-layout:fixed;width:100%"><thead><tr><th style="width:84px">거래일자</th><th style="width:46px">구분</th><th>내용/적요</th><th style="width:106px;text-align:right">출금(원)</th><th style="width:106px;text-align:right">입금(원)</th><th style="width:106px;text-align:right">잔액(원)</th><th style="width:126px">계정과목</th><th style="width:86px">계좌</th><th style="width:52px;text-align:center">관리</th></tr></thead><tbody id="ltb"></tbody></table></div>
     <div class="txl" id="lcards"></div>
     <div class="empty" id="lempty" style="display:none"><span class="empty-ic">📭</span><div class="empty-t">거래내역이 없습니다</div><div class="empty-s">파일을 가져오거나 직접 입력해주세요</div></div>
     <div id="lmob" style="padding:9px 12px;border-top:1px solid var(--bd);display:none"><div style="display:flex;gap:7px"><button class="btn sm" style="flex:1" onclick="openMo('mo-bank-up')">📁 가져오기</button><button class="btn sm" style="flex:1" onclick="expL('csv')">CSV↓</button><button class="btn sm p" style="flex:1" onclick="expL('xl')">엑셀↓</button></div></div>
@@ -1852,7 +1852,7 @@ function renderL() {
     return `<tr style="${needsBal?'background:#FFF7ED':''}">
       <td class="dn">${t.date}</td>
       <td><span class="badge ${t.type==='income'?'bi':'be'}">${t.type==='income'?'입금':'출금'}</span></td>
-      <td><div style="max-width:200px;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.desc}</div>${t.partner?`<div style="font-size:11px;color:var(--P);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🏢 ${t.partner}</div>`:t.note?`<div style="font-size:11px;color:var(--tm);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.note}</div>`:''}</td>
+      <td style="overflow:hidden"><div title="${t.desc.replace(/"/g,'&quot;')}" style="max-width:100%;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.desc}</div>${t.partner?`<div title="${t.partner.replace(/"/g,'&quot;')}" style="max-width:100%;font-size:11px;color:var(--P);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🏢 ${t.partner}</div>`:t.note?`<div title="${t.note.replace(/"/g,'&quot;')}" style="max-width:100%;font-size:11px;color:var(--tm);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.note}</div>`:''}</td>
       <td class="nm exp">${t.type==='expense'?fmt(t.amount):''}</td>
       <td class="nm inc">${t.type==='income'?fmt(t.amount):''}</td>
       ${balCell}
@@ -3359,6 +3359,8 @@ function calcMatchedIncome(d) {
 function renderCurrentProfit(d) {
   const m = calcMatchedIncome(d);
   const fmtRaw = n => Number(n||0).toLocaleString('ko-KR');
+  // 영업이익·순이익은 음수일 때 괄호 표기 (색상만으로 손익 구분이 어려운 문제 방지)
+  const fmtSigned = n => { const v = Math.round(n||0); const abs = Math.abs(v).toLocaleString('ko-KR'); return v<0 ? `(${abs})` : abs; };
 
   const sgaRows = Object.entries(m.sgaMap).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]);
 
@@ -3366,9 +3368,9 @@ function renderCurrentProfit(d) {
     ${fsHeader('현재순이익','선지급 급여 중 매출 미확인분을 제외한 실질 순이익', d.label)}
 
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px">
-      <div class="sc"><div class="sc-l">회계기준 당기순이익</div><div class="sc-v" style="color:var(--t2)">₩${fmtRaw(m.originalNetIncome)}</div></div>
+      <div class="sc"><div class="sc-l">회계기준 당기순이익</div><div class="sc-v" style="color:var(--t2)">${m.originalNetIncome<0?`(₩${fmtRaw(Math.abs(m.originalNetIncome))})`:`₩${fmtRaw(m.originalNetIncome)}`}</div></div>
       <div class="sc"><div class="sc-l" style="color:var(--O);font-weight:700">제외된 미매칭 급여</div><div class="sc-v" style="color:var(--O)">₩${fmtRaw(m.excludedWage)}</div></div>
-      <div class="sc"><div class="sc-l" style="color:var(--P);font-weight:700">현재순이익</div><div class="sc-v" style="color:var(--P);font-size:18px;font-weight:700">₩${fmtRaw(m.netIncome)}</div></div>
+      <div class="sc"><div class="sc-l" style="color:var(--P);font-weight:700">현재순이익</div><div class="sc-v" style="color:var(--P);font-size:18px;font-weight:700">${m.netIncome<0?`(₩${fmtRaw(Math.abs(m.netIncome))})`:`₩${fmtRaw(m.netIncome)}`}</div></div>
     </div>
 
     <div class="card" style="margin-bottom:12px">
@@ -3387,11 +3389,11 @@ function renderCurrentProfit(d) {
             <td>판관비 합계</td><td class="nm">${fmtRaw(m.originalTotalSGA)}</td><td class="nm">${fmtRaw(m.totalSGA)}</td>
           </tr>
           <tr style="font-weight:700">
-            <td>영업이익</td><td class="nm">${fmtRaw(m.originalOpProfit)}</td><td class="nm">${fmtRaw(m.opProfit)}</td>
+            <td>영업이익</td><td class="nm">${fmtSigned(m.originalOpProfit)}</td><td class="nm">${fmtSigned(m.opProfit)}</td>
           </tr>
           <tr><td>영업외손익</td><td class="nm">${fmtRaw(d.nonOp)}</td><td class="nm">${fmtRaw(d.nonOp)}</td></tr>
           <tr style="font-weight:700;background:var(--PU);color:var(--P)">
-            <td>★ 순이익</td><td class="nm">${fmtRaw(m.originalNetIncome)}</td><td class="nm">${fmtRaw(m.netIncome)}</td>
+            <td>★ 순이익</td><td class="nm">${fmtSigned(m.originalNetIncome)}</td><td class="nm">${fmtSigned(m.netIncome)}</td>
           </tr>
         </tbody>
       </table></div>
@@ -4381,8 +4383,8 @@ function renderIS(d, forPrint=false) {
     ${!forPrint ? `<div class="fs-summary-grid no-print">
       <div class="sc"><div class="sc-l">매출액</div><div class="sc-v inc">₩${fmt(d.totalRev)}</div></div>
       <div class="sc"><div class="sc-l">매출총이익</div><div class="sc-v ${d.grossProfit>=0?'bal':'exp'}">₩${fmt(Math.abs(d.grossProfit))}</div></div>
-      <div class="sc"><div class="sc-l">영업이익</div><div class="sc-v ${d.opProfit>=0?'bal':'exp'}">₩${fmt(Math.abs(d.opProfit))}</div></div>
-      <div class="sc"><div class="sc-l">당기순이익</div><div class="sc-v ${d.netIncome>=0?'inc':'exp'}">₩${fmt(Math.abs(d.netIncome))}</div></div>
+      <div class="sc"><div class="sc-l">영업이익</div><div class="sc-v ${d.opProfit>=0?'bal':'exp'}">${d.opProfit<0?`(₩${fmt(Math.abs(d.opProfit))})`:`₩${fmt(d.opProfit)}`}</div></div>
+      <div class="sc"><div class="sc-l">당기순이익</div><div class="sc-v ${d.netIncome>=0?'inc':'exp'}">${d.netIncome<0?`(₩${fmt(Math.abs(d.netIncome))})`:`₩${fmt(d.netIncome)}`}</div></div>
     </div>` : ''}
   </div>`;
 }
