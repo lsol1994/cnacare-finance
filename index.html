@@ -87,6 +87,8 @@ body{font-family:'Noto Sans KR',sans-serif;background:#EEF2F7;color:#1C2B3A;min-
 .btn.d{color:var(--R);border-color:var(--RL);background:var(--RL)}.btn.d:hover{background:#fcc}
 .btn.sm{padding:4px 10px;font-size:12px;border-radius:var(--r1)}
 .btn.ic{padding:5px;width:28px;height:28px;font-size:14px}
+.kh{margin-left:2px;font-size:10.5px;font-weight:400;opacity:.55}
+@media(max-width:860px){.kh{display:none}}
 /* Stats */
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:9px;margin-bottom:16px}
 .sc{background:var(--sf);border:1px solid var(--bd);border-radius:var(--r3);padding:12px 14px;box-shadow:var(--sh0)}
@@ -921,7 +923,7 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
       </div>
       <div class="fg full"><label class="fl">비고</label><input type="text" class="fc" id="lf-note" placeholder="메모"></div>
     </div>
-    <div class="mft"><button class="btn" onclick="closeMo('mo-l-add')">취소</button><button class="btn p" onclick="saveL()">✓ 저장</button></div>
+    <div class="mft"><button class="btn" onclick="closeMo('mo-l-add')">취소<span class="kh">Esc</span></button><button class="btn p" onclick="saveL()">✓ 저장<span class="kh">F2</span></button></div>
   </div>
 </div>
 <!-- 입출금 계정과목 변경 -->
@@ -1111,7 +1113,7 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
         </div>
       </div>
     </div>
-    <div class="mft"><button class="btn" onclick="closeMo('mo-exp-add')">취소</button><button class="btn p" onclick="saveExp()">✓ 저장</button></div>
+    <div class="mft"><button class="btn" onclick="closeMo('mo-exp-add')">취소<span class="kh">Esc</span></button><button class="btn p" onclick="saveExp()">✓ 저장<span class="kh">F2</span></button></div>
   </div>
 </div>
  
@@ -1493,6 +1495,50 @@ const NO_OVERLAY_CLOSE = new Set(['mo-l-add','mo-exp-add','mo-t-add','mo-c-add',
 document.querySelectorAll('.mo').forEach(o => o.addEventListener('click', e => {
   if(e.target === o && !NO_OVERLAY_CLOSE.has(o.id)) o.classList.remove('open');
 }));
+
+/* ═══════ 단축키 (상세보기/수정 모달) ═══════
+   거래 상세(mo-l-view):     Esc 닫기 · Ctrl/Cmd+E 수정 · Delete 또는 Ctrl/Cmd+D 삭제
+   지출결의서 상세(mo-exp-view): Esc 닫기 · Ctrl/Cmd+E 수정 · A 승인 · P 지급완료 · R 반려
+   거래/지출결의서 입력폼(mo-l-add, mo-exp-add): Esc 닫기 · F2 또는 Ctrl/Cmd+Enter 저장 */
+document.addEventListener('keydown', e => {
+  const mod = e.ctrlKey || e.metaKey;
+  const key = e.key.toLowerCase();
+  const isOpen = id => document.getElementById(id)?.classList.contains('open');
+
+  if (isOpen('mo-l-view')) {
+    const id = document.getElementById('mo-l-view').dataset.id;
+    if (e.key === 'Escape') { e.preventDefault(); closeMo('mo-l-view'); }
+    else if (mod && key === 'e') { e.preventDefault(); closeMo('mo-l-view'); openLAdd(id); }
+    else if (e.key === 'Delete' || (mod && key === 'd')) { e.preventDefault(); closeMo('mo-l-view'); delL(id); }
+    return;
+  }
+  if (isOpen('mo-exp-view')) {
+    const id = document.getElementById('mo-exp-view').dataset.id;
+    const t = expReqs.find(x=>x.id==id);
+    if (e.key === 'Escape') { e.preventDefault(); closeMo('mo-exp-view'); }
+    else if (mod && key === 'e') { e.preventDefault(); closeMo('mo-exp-view'); openExpAdd(id); }
+    else if (!mod && key === 'r') {
+      if (t && t.status!=='반려' && t.status!=='지급완료') { e.preventDefault(); closeMo('mo-exp-view'); changeExpStatus(id,'반려'); }
+    }
+    else if (!mod && key === 'a') {
+      if (t && t.status==='대기') { e.preventDefault(); closeMo('mo-exp-view'); changeExpStatus(id,'승인'); }
+    }
+    else if (!mod && key === 'p') {
+      if (t && (t.status==='승인'||t.status==='대기')) { e.preventDefault(); closeMo('mo-exp-view'); changeExpStatus(id,'지급완료'); }
+    }
+    return;
+  }
+  if (isOpen('mo-l-add')) {
+    if (e.key === 'Escape') { e.preventDefault(); closeMo('mo-l-add'); }
+    else if (e.key === 'F2' || (mod && e.key === 'Enter')) { e.preventDefault(); saveL(); }
+    return;
+  }
+  if (isOpen('mo-exp-add')) {
+    if (e.key === 'Escape') { e.preventDefault(); closeMo('mo-exp-add'); }
+    else if (e.key === 'F2' || (mod && e.key === 'Enter')) { e.preventDefault(); saveExp(); }
+    return;
+  }
+});
  
 /* ═══════ TOAST ═══════ */
 function toast(msg, type='') {
@@ -1874,9 +1920,10 @@ function openLView(id) {
       </div>`:''}
     </div>`;
   document.getElementById('l-view-footer').innerHTML=`
-    <button class="btn" onclick="closeMo('mo-l-view')">닫기</button>
-    <button class="btn" onclick="closeMo('mo-l-view');openLAdd(${t.id})">✏ 수정</button>
-    <button class="btn d" onclick="closeMo('mo-l-view');delL(${t.id})">🗑 삭제</button>`;
+    <button class="btn" onclick="closeMo('mo-l-view')">닫기<span class="kh">Esc</span></button>
+    <button class="btn" onclick="closeMo('mo-l-view');openLAdd(${t.id})">✏ 수정<span class="kh">Ctrl+E</span></button>
+    <button class="btn d" onclick="closeMo('mo-l-view');delL(${t.id})">🗑 삭제<span class="kh">Del</span></button>`;
+  document.getElementById('mo-l-view').dataset.id = t.id;
   openMo('mo-l-view');
 }
 function getLF() {
@@ -3200,12 +3247,13 @@ function openExpView(id) {
       })():''}
     </div>`;
   document.getElementById('exp-view-footer').innerHTML=`
-    <button class="btn" onclick="closeMo('mo-exp-view')">닫기</button>
+    <button class="btn" onclick="closeMo('mo-exp-view')">닫기<span class="kh">Esc</span></button>
     <button class="btn" onclick="closeMo('mo-exp-view');openExpCopy(${t.id})">📋 복사</button>
-    <button class="btn" onclick="closeMo('mo-exp-view');openExpAdd(${t.id})">✏ 수정</button>
-    ${t.status==='대기'?`<button class="btn g" onclick="closeMo('mo-exp-view');changeExpStatus(${t.id},'승인')">✓ 승인</button>`:''}
-    ${(t.status==='승인'||t.status==='대기')?`<button class="btn p" onclick="closeMo('mo-exp-view');changeExpStatus(${t.id},'지급완료')">💰 지급완료</button>`:''}
-    ${t.status!=='반려'&&t.status!=='지급완료'?`<button class="btn d" onclick="closeMo('mo-exp-view');changeExpStatus(${t.id},'반려')">✕ 반려</button>`:''}`;
+    <button class="btn" onclick="closeMo('mo-exp-view');openExpAdd(${t.id})">✏ 수정<span class="kh">Ctrl+E</span></button>
+    ${t.status==='대기'?`<button class="btn g" onclick="closeMo('mo-exp-view');changeExpStatus(${t.id},'승인')">✓ 승인<span class="kh">A</span></button>`:''}
+    ${(t.status==='승인'||t.status==='대기')?`<button class="btn p" onclick="closeMo('mo-exp-view');changeExpStatus(${t.id},'지급완료')">💰 지급완료<span class="kh">P</span></button>`:''}
+    ${t.status!=='반려'&&t.status!=='지급완료'?`<button class="btn d" onclick="closeMo('mo-exp-view');changeExpStatus(${t.id},'반려')">✕ 반려<span class="kh">R</span></button>`:''}`;
+  document.getElementById('mo-exp-view').dataset.id = t.id;
   openMo('mo-exp-view');
 }
  
