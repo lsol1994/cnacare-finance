@@ -933,6 +933,14 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
     <div class="mft"><button class="btn" onclick="closeMo('mo-l-acct')">취소</button><button class="btn p" onclick="applyLAcct()">✓ 적용</button></div>
   </div>
 </div>
+<!-- 입출금 상세보기 -->
+<div class="mo" id="mo-l-view">
+  <div class="mbox"><div class="mhandle"></div>
+    <div class="mh"><div class="mt">입출금 내역 상세</div><button class="mc" onclick="closeMo('mo-l-view')">✕</button></div>
+    <div id="l-view-body"></div>
+    <div class="mft" id="l-view-footer"></div>
+  </div>
+</div>
 <!-- 계좌 추가 -->
 <div class="mo" id="mo-acc-add">
   <div class="mbox"><div class="mhandle"></div>
@@ -1845,6 +1853,32 @@ function applyLAcct() {
   if(t){ t.acct=document.getElementById('la-sel').value; fsSet(COL.ledger,t.id,t); }
   closeMo('mo-l-acct'); renderL(); toast('계정과목이 변경되었습니다.','ok');
 }
+function openLView(id) {
+  const t=ledger.find(x=>x.id==id); if(!t) return;
+  document.getElementById('l-view-body').innerHTML=`
+    <div style="padding:2px 0 14px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+        <span class="badge ${t.type==='income'?'bi':'be'}" style="font-size:12px;padding:3px 10px">${t.type==='income'?'입금':'출금'}</span>
+        <span style="font-size:16px;font-weight:700">${t.desc}</span>
+      </div>
+      <div class="ev-row"><span class="ev-label">거래일자</span><span class="ev-val">${t.date}</span></div>
+      <div class="ev-row"><span class="ev-label">금액</span><span class="ev-val" style="font-size:16px;font-weight:700;color:${t.type==='income'?'var(--G)':'var(--R)'}">${t.type==='income'?'+':'-'}₩${fmt(t.amount)}</span></div>
+      <div class="ev-row"><span class="ev-label">잔액</span><span class="ev-val">₩${fmt(t.balance)}</span></div>
+      <div class="ev-row"><span class="ev-label">계정과목</span><span class="ev-val"><span class="at ${acctColor(t.acct)}">${t.acct||'미분류'}</span></span></div>
+      <div class="ev-row"><span class="ev-label">은행/계좌</span><span class="ev-val">${t.bank||'-'}</span></div>
+      ${t.partner?`<div class="ev-row"><span class="ev-label">매출처</span><span class="ev-val">${t.partner}</span></div>`:''}
+      ${t.note?`<div class="ev-row"><span class="ev-label">비고</span><span class="ev-val">${t.note}</span></div>`:''}
+      ${t.linkedExpId?`
+      <div style="margin-top:10px;padding:9px 12px;background:var(--PU);border-radius:var(--r2);font-size:12px;color:var(--P)">
+        💡 지출결의서에서 자동 생성된 내역입니다
+      </div>`:''}
+    </div>`;
+  document.getElementById('l-view-footer').innerHTML=`
+    <button class="btn" onclick="closeMo('mo-l-view')">닫기</button>
+    <button class="btn" onclick="closeMo('mo-l-view');openLAdd(${t.id})">✏ 수정</button>
+    <button class="btn d" onclick="closeMo('mo-l-view');delL(${t.id})">🗑 삭제</button>`;
+  openMo('mo-l-view');
+}
 function getLF() {
   const mo=moSel('lf-mo'), ty=moSel('lf-ty'), ac=moSel('lf-ac'),
         q=(document.getElementById('lf-q')||{}).value||'';
@@ -1871,26 +1905,26 @@ function renderL() {
     return `<tr style="${needsBal?'background:#FFF7ED':''}">
       <td class="dn">${t.date}</td>
       <td><span class="badge ${t.type==='income'?'bi':'be'}">${t.type==='income'?'입금':'출금'}</span></td>
-      <td style="overflow:hidden"><div title="${t.desc.replace(/"/g,'&quot;')}" style="max-width:100%;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.desc}</div>${t.partner?`<div title="${t.partner.replace(/"/g,'&quot;')}" style="max-width:100%;font-size:11px;color:var(--P);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🏢 ${t.partner}</div>`:t.note?`<div title="${t.note.replace(/"/g,'&quot;')}" style="max-width:100%;font-size:11px;color:var(--tm);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.note}</div>`:''}</td>
+      <td style="overflow:hidden;cursor:pointer" onclick="openLView(${t.id})"><div title="${t.desc.replace(/"/g,'&quot;')}" style="max-width:100%;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.desc}</div>${t.partner?`<div title="${t.partner.replace(/"/g,'&quot;')}" style="max-width:100%;font-size:11px;color:var(--P);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🏢 ${t.partner}</div>`:t.note?`<div title="${t.note.replace(/"/g,'&quot;')}" style="max-width:100%;font-size:11px;color:var(--tm);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.note}</div>`:''}</td>
       <td class="nm exp">${t.type==='expense'?fmt(t.amount):''}</td>
       <td class="nm inc">${t.type==='income'?fmt(t.amount):''}</td>
       ${balCell}
-      <td><span class="at ${cc}" onclick="openLAcct(${t.id})">${t.acct||'미분류'} ✏</span></td>
+      <td><span class="at ${cc}" onclick="event.stopPropagation();openLAcct(${t.id})">${t.acct||'미분류'} ✏</span></td>
       <td style="font-size:11px;color:var(--tm)">${t.bank}</td>
       <td><button class="btn sm ic" onclick="openLAdd(${t.id})">✏</button> <button class="btn sm ic d" onclick="delL(${t.id})">🗑</button></td>
     </tr>`;
   }).join('');
   ca.innerHTML=rows.map(t=>{
     const needsBal = t.linkedExpId && !Number(t.balance);
-    return `<div class="txc" style="${needsBal?'border-left:3px solid var(--O);background:#FFF7ED':''}">
+    return `<div class="txc" onclick="openLView(${t.id})" style="cursor:pointer;${needsBal?'border-left:3px solid var(--O);background:#FFF7ED':''}">
     <div class="txc-tp"><div class="txc-d">${t.desc}</div><div class="txc-a ${t.type==='income'?'inc':'exp'}">${t.type==='income'?'+':'-'}${fmtS(t.amount)}</div></div>
     ${t.partner?`<div style="font-size:11px;color:var(--P);font-weight:500;margin:-3px 0 4px">🏢 ${t.partner}</div>`:''}
     <div class="txc-bt"><span class="txc-dt">${t.date}</span><span class="badge ${t.type==='income'?'bi':'be'}">${t.type==='income'?'입금':'출금'}</span>
       ${needsBal
-        ? `<button class="btn sm" style="color:var(--O);border-color:var(--O);background:var(--OL);font-size:11px;padding:2px 7px" onclick="openLAdd(${t.id})">잔액 입력 ✏</button>`
+        ? `<button class="btn sm" style="color:var(--O);border-color:var(--O);background:var(--OL);font-size:11px;padding:2px 7px" onclick="event.stopPropagation();openLAdd(${t.id})">잔액 입력 ✏</button>`
         : `<span style="font-size:11px;color:var(--tm)">잔액 ${fmt(t.balance)}</span>`}
-      <span class="at ${acctColor(t.acct)}" onclick="openLAcct(${t.id})">${t.acct||'미분류'} ✏</span>
-      <div class="txc-ac"><button class="btn sm ic" onclick="openLAdd(${t.id})">✏</button><button class="btn sm ic d" onclick="delL(${t.id})">🗑</button></div>
+      <span class="at ${acctColor(t.acct)}" onclick="event.stopPropagation();openLAcct(${t.id})">${t.acct||'미분류'} ✏</span>
+      <div class="txc-ac" onclick="event.stopPropagation()"><button class="btn sm ic" onclick="openLAdd(${t.id})">✏</button><button class="btn sm ic d" onclick="delL(${t.id})">🗑</button></div>
     </div></div>`;
   }).join('');
 }
