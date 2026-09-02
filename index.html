@@ -1498,7 +1498,7 @@ document.querySelectorAll('.mo').forEach(o => o.addEventListener('click', e => {
 
 /* ═══════ 단축키 (상세보기/수정 모달) ═══════
    거래 상세(mo-l-view):     Esc 닫기 · Ctrl/Cmd+E 수정 · Delete 또는 Ctrl/Cmd+D 삭제
-   지출결의서 상세(mo-exp-view): Esc 닫기 · Ctrl/Cmd+E 수정 · A 승인 · P 지급완료 · R 반려
+   지출결의서 상세(mo-exp-view): Esc 닫기 · Ctrl/Cmd+E 수정 · C 복사 · A 승인 · P 지급완료 · R 반려
    거래/지출결의서 입력폼(mo-l-add, mo-exp-add): Esc 닫기 · F2 또는 Ctrl/Cmd+Enter 저장 */
 document.addEventListener('keydown', e => {
   const mod = e.ctrlKey || e.metaKey;
@@ -1517,6 +1517,7 @@ document.addEventListener('keydown', e => {
     const t = expReqs.find(x=>x.id==id);
     if (e.key === 'Escape') { e.preventDefault(); closeMo('mo-exp-view'); }
     else if (mod && key === 'e') { e.preventDefault(); closeMo('mo-exp-view'); openExpAdd(id); }
+    else if (!mod && key === 'c') { e.preventDefault(); closeMo('mo-exp-view'); openExpCopy(id); }
     else if (!mod && key === 'r') {
       if (t && t.status!=='반려' && t.status!=='지급완료') { e.preventDefault(); closeMo('mo-exp-view'); changeExpStatus(id,'반려'); }
     }
@@ -3248,7 +3249,7 @@ function openExpView(id) {
     </div>`;
   document.getElementById('exp-view-footer').innerHTML=`
     <button class="btn" onclick="closeMo('mo-exp-view')">닫기<span class="kh">Esc</span></button>
-    <button class="btn" onclick="closeMo('mo-exp-view');openExpCopy(${t.id})">📋 복사</button>
+    <button class="btn" onclick="closeMo('mo-exp-view');openExpCopy(${t.id})">📋 복사<span class="kh">C</span></button>
     <button class="btn" onclick="closeMo('mo-exp-view');openExpAdd(${t.id})">✏ 수정<span class="kh">Ctrl+E</span></button>
     ${t.status==='대기'?`<button class="btn g" onclick="closeMo('mo-exp-view');changeExpStatus(${t.id},'승인')">✓ 승인<span class="kh">A</span></button>`:''}
     ${(t.status==='승인'||t.status==='대기')?`<button class="btn p" onclick="closeMo('mo-exp-view');changeExpStatus(${t.id},'지급완료')">💰 지급완료<span class="kh">P</span></button>`:''}
