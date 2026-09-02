@@ -3294,6 +3294,76 @@ function computeARMatching() {
 }
 
 /* ══════════════════════════════
+   오입금 의심 입금 탐지
+   ══════════════════════════════
+   - 매출액(income, acct='매출액') 입금 중 아래 사유에 해당하는 건을 "오입금 의심"으로 별도 표시
+     ① 이름매칭실패   : 입금 내용(desc)에서 환자-간병인 이름쌍을 추출하지 못함
+     ② 매칭그룹없음   : 이름쌍은 추출됐지만 대응하는 급여 지급건(그룹)이 존재하지 않음
+     ③ 초과입금       : 매칭된 그룹의 실입금 누적액이 지급 예상매출액을 초과한 부분(그룹 내 시간순 누적 기준)
+   - 사람이 "확인"(오입금 아님) 처리한 건은 해당 ledger 항목의 arReviewed 필드에 저장되어 Firestore에 영속화됨 */
+function computeSuspiciousDeposits() {
+  const { rows: arGroups } = computeARMatching();
+
+  // 환자명이 인식된 그룹만 입금 매칭 대상 (기존 computeARMatching 로직과 동일한 규칙)
+  const groupByKey = {};
+  arGroups.forEach(g => {
+    if(!g.patient) return;
+    groupByKey[`${patientMatchKey(g.patient)}|${caregiverMatchKey(g.caregiver)}`] = g;
+  });
+
+  const mk = (t, reason, reasonDetail, flagAmt) => ({
+    id: t.id, date: t.date, desc: t.desc||'', partner: t.partner||'',
+    amount: Number(t.amount||0), flagAmt: Math.round(Number(flagAmt||0)),
+    reason, reasonDetail, reviewed: !!t.arReviewed
+  });
+
+  const list = [];
+
+  // ①② 매칭 자체가 안 되는 입금
+  ledger.filter(t => t.type==='income' && t.acct==='매출액').forEach(t => {
+    const pair = extractLedgerNamePair(t.desc);
+    if(!pair) {
+      list.push(mk(t, '이름매칭실패', '입금 내용에서 환자-간병인 이름 쌍을 추출하지 못했습니다. 지급 대상과 무관한 착오송금일 수 있습니다.', t.amount));
+      return;
+    }
+    const [raw1, raw2] = pair;
+    const key1 = `${patientMatchKey(raw1)}|${caregiverMatchKey(raw2)}`;
+    const key2 = `${patientMatchKey(raw2)}|${caregiverMatchKey(raw1)}`;
+    if(!groupByKey[key1] && !groupByKey[key2]) {
+      list.push(mk(t, '매칭그룹없음', `이름쌍(${raw1} - ${raw2})에 해당하는 급여 지급건을 찾을 수 없습니다.`, t.amount));
+    }
+  });
+
+  // ③ 그룹별 초과입금분 (그룹 내 입금을 날짜순으로 누적해 예상매출액을 넘는 부분만 산출)
+  arGroups.forEach(g => {
+    if(!(g.expectedTotal>0 && g.receivedTotal > g.expectedTotal)) return;
+    const sorted = [...g.recvRows].sort((a,b) => (a.date||'').localeCompare(b.date||'') || String(a.id).localeCompare(String(b.id)));
+    let cum = 0;
+    sorted.forEach(t => {
+      const before = cum;
+      cum += Number(t.amount||0);
+      if(before >= g.expectedTotal) {
+        list.push(mk(t, '초과입금', `${g.patient} - ${g.caregiver} 건은 예상매출액을 이미 채운 뒤 추가로 입금되었습니다.`, t.amount));
+      } else if(cum > g.expectedTotal) {
+        list.push(mk(t, '초과입금(부분)', `${g.patient} - ${g.caregiver} 건 예상매출액(${fmt(g.expectedTotal)}원)을 ${fmt(cum - g.expectedTotal)}원 초과했습니다.`, cum - g.expectedTotal));
+      }
+    });
+  });
+
+  return list.sort((a,b) => (b.date||'').localeCompare(a.date||''));
+}
+
+/* 오입금 의심 항목 확인/취소 토글 — "오입금 아님"으로 사람이 검토 확인 처리 (다시 누르면 취소) */
+function toggleARReview(id) {
+  const item = ledger.find(l => l.id == id);
+  if(!item) return;
+  item.arReviewed = !item.arReviewed;
+  fsSet(COL.ledger, item.id, item);
+  toast(item.arReviewed ? '확인 처리되었습니다.' : '확인이 취소되었습니다.', 'ok');
+  renderExpAR();
+}
+
+/* ══════════════════════════════
    현재순이익: 선지급된 급여 중 매칭되는 매출액이
    들어오지 않은 건은 제외하고, 실제 입금된 비율만큼만
    급여비용으로 인정하여 재계산한 순이익
@@ -3449,6 +3519,9 @@ function renderExpAR() {
   const arMatch = computeARMatching();
   const matchStatusColor = { '완납':'var(--G)', '부분입금':'var(--O)', '미입금':'var(--R)' };
   const matchStatusBg    = { '완납':'#F0FDF4', '부분입금':'#FFF7ED', '미입금':'#FEF2F2' };
+  const susp = computeSuspiciousDeposits();
+  const suspUnreviewed = susp.filter(s => !s.reviewed);
+  const suspUnreviewedAmt = suspUnreviewed.reduce((s,x)=>s+x.flagAmt,0);
 
   const html = `
     <!-- 요약 카드 -->
@@ -3457,6 +3530,40 @@ function renderExpAR() {
       <div class="sc"><div class="sc-l">실 입금 매출액</div><div class="sc-v inc">₩${fmt(totalReceived)}</div></div>
       <div class="sc"><div class="sc-l" style="color:var(--O);font-weight:700">외상매출금 (미수금)</div><div class="sc-v" style="color:var(--O);font-size:18px;font-weight:700">₩${fmt(netAR)}</div></div>
     </div>
+
+    <!-- 오입금 의심 입금 내역 -->
+    ${susp.length ? `
+    <div class="card" style="margin-bottom:12px;border:1px solid #FCA5A5">
+      <div class="ch" style="background:#FEF2F2">
+        <span class="ct" style="color:var(--R)">⚠️ 오입금 의심 입금 내역 — 총 ${susp.length}건 (미확인 ${suspUnreviewed.length}건 · ₩${fmt(suspUnreviewedAmt)})</span>
+      </div>
+      <div class="tw"><table>
+        <thead><tr>
+          <th style="width:88px">거래일자</th>
+          <th>내용</th>
+          <th style="width:110px">거래처</th>
+          <th style="width:100px;text-align:right">입금액(원)</th>
+          <th style="width:100px;text-align:right">의심금액(원)</th>
+          <th style="width:110px">사유</th>
+          <th style="width:80px;text-align:center">확인</th>
+        </tr></thead>
+        <tbody>
+          ${susp.map(s => `
+            <tr style="${s.reviewed?'opacity:.45;':''}${s.partner.includes('유바이오젠')?'background:#FFF1F2':''}">
+              <td class="dn">${s.date}</td>
+              <td style="font-size:12.5px">${s.desc}</td>
+              <td style="font-size:12px;color:var(--P);font-weight:${s.partner.includes('유바이오젠')?'700':'400'}">${s.partner||'-'}</td>
+              <td class="nm">${fmt(s.amount)}</td>
+              <td class="nm" style="color:var(--R);font-weight:700">${fmt(s.flagAmt)}</td>
+              <td style="font-size:11.5px;color:var(--t3)" title="${s.reasonDetail.replace(/"/g,'&quot;')}">${s.reason}</td>
+              <td style="text-align:center"><button class="btn sm" onclick="toggleARReview(${s.id})">${s.reviewed?'✔확인됨':'확인'}</button></td>
+            </tr>`).join('')}
+        </tbody>
+      </table></div>
+      <div style="padding:8px 14px;font-size:11.5px;color:var(--t3);border-top:1px solid var(--bd)">
+        판정 기준: ① 이름쌍 매칭 실패 ② 매칭되는 지급건 없음 ③ 그룹 예상매출액 초과입금분. "확인" 버튼을 누르면 오입금이 아님으로 표시(회색 처리)되며, 다시 누르면 취소됩니다.
+      </div>
+    </div>` : ''}
 
     <!-- 환자·간병인 기준 입금 대조표 (핵심) -->
     <div class="card" style="margin-bottom:12px">
@@ -3707,6 +3814,10 @@ function arExport(fmt2) {
   const recvHdr = ['거래일자','내용','매출처','입금액(원)'];
   const recvData = incomeRows.map(t => [t.date, t.desc, t.partner||'', t.amount]);
 
+  const susp = computeSuspiciousDeposits();
+  const suspHdr = ['거래일자','내용','거래처','입금액(원)','의심금액(원)','사유','확인여부'];
+  const suspData = susp.map(s => [s.date, s.desc, s.partner||'', s.amount, s.flagAmt, s.reason, s.reviewed?'확인됨':'미확인']);
+
   if(fmt2==='csv'){
     const esc = v => typeof v==='string' && (v.includes(',')||v.includes('"')) ? `"${v.replace(/"/g,'""')}"` : v;
     const section = (title,hdr,data) => [title, hdr.join(','), ...data.map(r=>r.map(esc).join(','))].join('\n');
@@ -3716,6 +3827,8 @@ function arExport(fmt2) {
       section('■ 지급 내역 (우리 협회 → 간병인 급여)', payHdr, payData),
       '',
       section('■ 입금 내역 (업체 → 우리 협회 매출)', recvHdr, recvData),
+      '',
+      section('■ 오입금 의심 내역', suspHdr, suspData),
     ].join('\n');
     dlBlob('\uFEFF'+out, 'text/csv', '외상매출금_현황.csv');
     toast('CSV 다운로드','ok');
@@ -3732,6 +3845,10 @@ function arExport(fmt2) {
     const ws3 = XLSX.utils.aoa_to_sheet([recvHdr, ...recvData]);
     ws3['!cols'] = [{wch:12},{wch:32},{wch:16},{wch:14}];
     XLSX.utils.book_append_sheet(wb, ws3, '입금내역(업체)');
+
+    const ws4 = XLSX.utils.aoa_to_sheet([suspHdr, ...suspData]);
+    ws4['!cols'] = [{wch:12},{wch:32},{wch:14},{wch:13},{wch:13},{wch:14},{wch:10}];
+    XLSX.utils.book_append_sheet(wb, ws4, '오입금의심');
 
     XLSX.writeFile(wb, '외상매출금_현황.xlsx');
     toast('엑셀 다운로드','ok');
