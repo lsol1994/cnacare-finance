@@ -3296,6 +3296,7 @@ function setExpTab(tab) {
    매칭 규칙:
    - 환자명이 영문이면 공백을 무시하고 앞 5자리만 비교 (은행 표기가 축약/절삭되는 경우 대응)
    - 간병인명(수취인)에 영문명과 한글명이 함께 있으면 한글명만 추출하여 비교
+   - 간병인명(한글)이 4자 이상이면 앞 3자리만 비교 (업체 입금 시 간병인명을 3자리까지만 기재하는 경우 대응)
    - 환자명을 제목에서 인식하지 못한 건은 서로 합산하지 않고 건별로 각각 표시 (오합산 방지) */
 const AR_NAME_PAT = '(?:[가-힣]{2,12}|[A-Za-z]{2,}(?:\\s+[A-Za-z]+)*)';
 function normArName(s) {
@@ -3311,12 +3312,15 @@ function patientMatchKey(name) {
   }
   return normArName(n);
 }
-/* 간병인명(수취인) 비교 키: 영문/한글이 함께 있으면 한글 부분만 추출해 비교 */
+/* 간병인명(수취인) 비교 키: 영문/한글이 함께 있으면 한글 부분만 추출해 비교
+   업체(유바이오젠) 입금 시 간병인명을 3자리까지만 기재하는 경우가 있어,
+   한글 이름이 4자 이상이면 앞 3자리로 축약해 비교(지급분도 동일 규칙 적용해 서로 매칭되도록 함) */
 function caregiverMatchKey(name) {
   const raw = (name||'').trim();
   if(!raw) return '';
   const kor = raw.match(/[가-힣]{2,10}/);
-  const base = kor ? kor[0] : raw;
+  let base = kor ? kor[0] : raw;
+  if(kor && base.length >= 4) base = base.slice(0,3);
   return normArName(base);
 }
 function extractPatientName(title) {
