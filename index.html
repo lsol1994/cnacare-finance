@@ -799,8 +799,8 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
     <div class="card" style="padding:16px 18px">
       <div style="font-size:13px;font-weight:700;color:#15803d;margin-bottom:6px">④ 운전자본의 영향</div>
       <div style="font-size:12.5px;color:var(--t2);line-height:1.7">
-        지출을 먼저 하고 나중에 정산하거나(선급금), 비용은 이미 발생했지만 아직 지급하지 않은 돈(미지급금)이 있으면 현금 흐름과 손익이 시차를 두고 움직입니다.<br>
-        현재 선급금(승인 대기 지출결의서) <b id="fsg-prepaid">-</b>, 미지급금(대기 상태 지출결의서) <b id="fsg-unpaid">-</b>이 이런 "현금 잠김·유예" 효과를 만들고 있습니다.
+        비용은 이미 발생했지만 아직 실제로 지급하지 않은 돈(미지급금)이 쌓여있으면, 손익계산서상 비용 인식 시점과 실제 현금이 빠져나가는 시점 사이에 시차가 생깁니다. (반대로 재고자산을 미리 구입하거나 비용을 선지급하는 경우엔 현금이 먼저 나가고 비용 인식이 나중이 되는 경우도 있습니다.)<br>
+        현재 미지급금(검토 대기) <b id="fsg-unpaid">-</b>, 미지급금(승인 완료·지급 대기) <b id="fsg-approved">-</b>이 아직 실제로 지급되지 않은 채 쌓여 있어 이런 "현금 유예" 효과를 만들고 있습니다.
       </div>
     </div>
 
@@ -4566,22 +4566,22 @@ function getDrillRows(key, start, end) {
         amount: -totalReceived, note: '수령 완료'
       });
     } else if(acct === 'unpaid') {
-      // 미지급금: 대기 상태 지출결의서
+      // 미지급금(대기): 아직 검토/승인 전 지출결의서 — 지급 안 됨
       expReqs
         .filter(t => t.status==='대기')
         .forEach(t => rows.push({
           date: t.payDate||t.draftDate, acct: t.acct||'',
           partner: t.payee||'', desc: t.title||'',
-          amount: Number(t.amount||0), note: '대기(미지급)'
+          amount: Number(t.amount||0), note: '대기(미검토·미지급)'
         }));
-    } else {
-      // 선급금: 승인 대기
+    } else if(acct === 'approved') {
+      // 미지급금(승인): 승인 완료, 아직 실제 지급(ledger 반영) 전 — "선급금" 아님
       expReqs
-        .filter(t => t.status==='승인' && inRange(t.draftDate))
+        .filter(t => t.status==='승인')
         .forEach(t => rows.push({
           date: t.payDate||t.draftDate, acct: t.acct||'',
           partner: t.payee||'', desc: t.title||'',
-          amount: Number(t.amount||0), note: `${t.method||''} (승인대기)`
+          amount: Number(t.amount||0), note: `${t.method||''} (승인·지급대기)`
         }));
     }
   }
@@ -4844,11 +4844,6 @@ function calcFSData(prefix) {
 
   const bsArWage = Math.max(totalExpectedAR - totalReceivedRev, 0);
 
-  // ② 선급금: 승인 상태(미지급) 지출결의서
-  const bsPrepaid = expReqs
-    .filter(t => t.status==='승인')
-    .reduce((s,t) => s+Number(t.amount||0), 0);
-
   // ③ 현금·예금: 조회 기간 말 마지막 잔액
   const latestInPeriod = [...ledger]
     .filter(l => l.date <= end && Number(l.balance) > 0)
@@ -4863,19 +4858,25 @@ function calcFSData(prefix) {
     .filter(t => t.ditype==='매출' && t.status!=='완료')
     .reduce((s,t) => s+Number(t.total||0), 0);
 
-  const totalAssets = bsArWage + bsPrepaid + bsCash + bsArTax;
+  const totalAssets = bsArWage + bsCash + bsArTax;
 
   // ── 부채 ──
   const bsShortLoan = ledger
     .filter(t => t.type==='income' && t.acct==='단기차입금')
     .reduce((s,t) => s+Number(t.amount||0), 0);
+  // 미지급금(대기): 아직 검토/승인 전 지출결의서 — 지급 안 됨
   const bsUnpaid = expReqs
     .filter(t => t.status==='대기')
+    .reduce((s,t) => s+Number(t.amount||0), 0);
+  // 미지급금(승인): 승인은 완료됐지만 실제 지급(=ledger 반영)은 아직 안 된 지출결의서
+  // ※ "선급금"이 아님 — 승인 상태는 "지급 대기중"이며 회사가 먼저 낸 돈이 아니라 앞으로 내야 할 돈이므로 부채로 분류
+  const bsApproved = expReqs
+    .filter(t => t.status==='승인')
     .reduce((s,t) => s+Number(t.amount||0), 0);
   const bsApTax = taxInv
     .filter(t => t.ditype==='매입' && t.status!=='완료')
     .reduce((s,t) => s+Number(t.total||0), 0);
-  const totalLiab = bsShortLoan + bsUnpaid + bsApTax;
+  const totalLiab = bsShortLoan + bsUnpaid + bsApproved + bsApTax;
 
   // ── 자본 ──
   const bsCapital = ledger
@@ -4917,7 +4918,6 @@ function calcFSData(prefix) {
   const arAmt = bsArWage + bsArTax;
   const arTax = bsArTax;
   const arWage = bsArWage;
-  const prepaid = bsPrepaid;
   const cashBal = bsCash;
   const paidIn  = bsCapital;
   const apAmt   = bsApTax;
@@ -4934,12 +4934,12 @@ function calcFSData(prefix) {
     // ledIncome 하위 호환 (드릴다운용)
     ledIncome: ledSale,
     // B/S
-    cashBal, arAmt, arTax, arWage, prepaid, totalAssets,
+    cashBal, arAmt, arTax, arWage, totalAssets,
     apAmt, totalLiab,
     paidIn, totalEquity, liabEquity, bsBalance,
     // 재무상태표 세부항목
-    bsArWage, bsPrepaid, bsCash, bsArTax,
-    bsShortLoan, bsUnpaid, bsApTax,
+    bsArWage, bsCash, bsArTax,
+    bsShortLoan, bsUnpaid, bsApproved, bsApTax,
     bsCapital, bsRetained, bsRetainedLabel, bsCarryOver,
   };
 }
@@ -5044,24 +5044,24 @@ function renderBS(d, forPrint=false) {
      ① 현금·예금      - 즉시 사용 가능
      ② 외상매출금     - 단기 회수 예정
      ③ 미수수익       - 세금계산서 미완료 매출
-     ④ 선급금         - 지출 선지급
   ─────────────────────────────────────────────────────── */
   const assets = [
     { label:'현금·예금',   sub:'입출금 내역 기간 말 잔액',          val: d.bsCash,     key:'ledger:ALL',         lbl:'현금·예금 잔액' },
     { label:'외상매출금',  sub:'급여 예상매출액 합계 - 실 입금액',   val: d.bsArWage,   key:'expReq:wage',        lbl:'외상매출금' },
     { label:'미수수익',    sub:'세금계산서 미완료 매출',             val: d.bsArTax,    key:'taxSale:ALL',        lbl:'미수수익(세금계산서)' },
-    { label:'선급금',      sub:'승인 대기 지출결의서',               val: d.bsPrepaid,  key:'expReq:ALL',         lbl:'선급금(승인대기)' },
   ];
 
   /* ── 부채 항목 (유동성 배열법: 상환 빠른 순) ─────────────
-     ① 미지급금       - 단기 지급 의무
-     ② 외상매입금     - 세금계산서 미완료 매입
-     ③ 단기차입금     - 금융기관 차입
+     ① 미지급금(대기)   - 아직 검토/승인 전, 지급 안 됨
+     ② 미지급금(승인)   - 승인 완료, 지급 대기중 (= 아직 지급 안 됨. "선급금" 아님)
+     ③ 외상매입금       - 세금계산서 미완료 매입
+     ④ 단기차입금       - 금융기관 차입
   ─────────────────────────────────────────────────────── */
   const liabs = [
-    { label:'미지급금',    sub:'대기 상태 지출결의서',               val: d.bsUnpaid,    key:'expReq:unpaid',      lbl:'미지급금' },
-    { label:'외상매입금',  sub:'세금계산서 미완료 매입',             val: d.bsApTax,     key:'taxBuy:ALL',         lbl:'외상매입금' },
-    { label:'단기차입금',  sub:"계정과목 '단기차입금' 입금 합계",    val: d.bsShortLoan, key:'ledger_income:단기차입금', lbl:'단기차입금' },
+    { label:'미지급금(대기)', sub:'대기(미검토) 상태 지출결의서',       val: d.bsUnpaid,    key:'expReq:unpaid',      lbl:'미지급금(대기)' },
+    { label:'미지급금(승인)', sub:'승인 완료 · 지급 대기 지출결의서',   val: d.bsApproved,  key:'expReq:approved',    lbl:'미지급금(승인)' },
+    { label:'외상매입금',     sub:'세금계산서 미완료 매입',             val: d.bsApTax,     key:'taxBuy:ALL',         lbl:'외상매입금' },
+    { label:'단기차입금',     sub:"계정과목 '단기차입금' 입금 합계",    val: d.bsShortLoan, key:'ledger_income:단기차입금', lbl:'단기차입금' },
   ];
 
   /* ── 자본 항목 ────────────────────────────────────────
@@ -5235,11 +5235,11 @@ function renderTB(d, forPrint=false) {
     { grp:'자산', acct:'현금·예금',   side:'debit', amt:d.bsCash,     key:'ledger:ALL',                note:'입출금 내역 기간 말 잔액' },
     { grp:'자산', acct:'외상매출금',  side:'debit', amt:d.bsArWage,   key:'expReq:wage',               note:'급여 예상매출액 − 실입금액' },
     { grp:'자산', acct:'미수수익',    side:'debit', amt:d.bsArTax,    key:'taxSale:ALL',               note:'세금계산서 미완료 매출' },
-    { grp:'자산', acct:'선급금',      side:'debit', amt:d.bsPrepaid,  key:'expReq:ALL',                note:'승인 대기 지출결의서' },
     // ── 부채 (대변) ──
-    { grp:'부채', acct:'미지급금',    side:'credit', amt:d.bsUnpaid,    key:'expReq:unpaid',           note:'대기 상태 지출결의서' },
-    { grp:'부채', acct:'외상매입금',  side:'credit', amt:d.bsApTax,     key:'taxBuy:ALL',              note:'세금계산서 미완료 매입' },
-    { grp:'부채', acct:'단기차입금',  side:'credit', amt:d.bsShortLoan, key:'ledger_income:단기차입금', note:"계정과목 '단기차입금' 입금 합계" },
+    { grp:'부채', acct:'미지급금(대기)', side:'credit', amt:d.bsUnpaid,    key:'expReq:unpaid',           note:'대기(미검토) 상태 지출결의서' },
+    { grp:'부채', acct:'미지급금(승인)', side:'credit', amt:d.bsApproved,  key:'expReq:approved',         note:'승인 완료 · 지급 대기' },
+    { grp:'부채', acct:'외상매입금',     side:'credit', amt:d.bsApTax,     key:'taxBuy:ALL',              note:'세금계산서 미완료 매입' },
+    { grp:'부채', acct:'단기차입금',     side:'credit', amt:d.bsShortLoan, key:'ledger_income:단기차입금', note:"계정과목 '단기차입금' 입금 합계" },
     // ── 자본 (대변) ──
     { grp:'자본', acct:'자본금',                    side:'credit', amt:d.bsCapital,   key:'ledger_income:보통주자본금', note:'보통주자본금 누계' },
     { grp:'자본', acct:'전기이월 미처분이익잉여금',  side:'credit', amt:priorRetained, key:'',                           note:'당기 이전 누적 손익' },
@@ -5387,8 +5387,8 @@ function renderFsGuide() {
   set('fsg-ar-wage',    fmtFSRaw(d.bsArWage)   + '원');
   set('fsg-ar-tax',     fmtFSRaw(d.bsArTax)    + '원');
   set('fsg-short-loan', fmtFSRaw(d.bsShortLoan)+ '원');
-  set('fsg-prepaid',    fmtFSRaw(d.bsPrepaid)  + '원');
   set('fsg-unpaid',     fmtFSRaw(d.bsUnpaid)   + '원');
+  set('fsg-approved',   fmtFSRaw(d.bsApproved) + '원');
   set('fsg-net-income', d.netIncome<0 ? `(₩${fmt(Math.abs(d.netIncome))})` : `₩${fmt(d.netIncome)}`);
   set('fsg-cash',       `₩${fmt(d.bsCash)}`);
 }
