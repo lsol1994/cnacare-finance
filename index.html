@@ -116,6 +116,8 @@ tbody tr:hover td{background:var(--PU)}
 .nm{font-family:'JetBrains Mono',monospace;font-size:12.5px;font-weight:600;text-align:right;white-space:nowrap}
 .nm.inc{color:var(--G)}.nm.exp{color:var(--R)}.nm.bal{color:var(--t3);font-size:11.5px;font-weight:400}
 .nm.sale{color:var(--G)}.nm.buy{color:var(--V)}.nm.card{color:var(--O)}
+.ar-mcell{cursor:pointer;border-radius:4px;transition:background .12s}
+.ar-mcell:hover{background:var(--PU)!important}
 /* Badges */
 .badge{display:inline-flex;align-items:center;padding:2px 7px;border-radius:20px;font-size:10.5px;font-weight:600;white-space:nowrap}
 .bi{background:var(--GL);color:var(--G)}.be{background:var(--RL);color:var(--R)}
@@ -3851,6 +3853,7 @@ function fmtARSplit(net){
   return { ar: dash, over: dash };
 }
 function renderARYearlyMonthlyTable(){
+  arYMDetailKey = null; // 표가 새로 그려질 때마다 상세 패널 열림 상태 초기화
   const map = computeARYearlyMonthly();
   const years = Object.keys(map).sort((a,b)=>b.localeCompare(a));
   if(!years.length) return `<div style="padding:16px;text-align:center;color:var(--tm);font-size:12.5px">데이터가 없습니다</div>`;
@@ -3867,24 +3870,24 @@ function renderARYearlyMonthlyTable(){
       return `<tr class="ar-yr-row-${y}" style="display:${yi===0?'':'none'};cursor:pointer" onclick="filterARByPeriod('${y}','${m}')">
         <td style="padding-left:26px;color:var(--t2)">${y}-${m}</td>
         <td style="text-align:center">${md.count}</td>
-        <td class="nm" style="color:var(--R)">${fmt(md.pay)}</td>
-        <td class="nm" style="color:var(--G)">${fmt(md.fee)}</td>
-        <td class="nm" style="color:var(--P);font-weight:600">${fmt(md.expected)}</td>
-        <td class="nm" style="color:var(--P)">${fmt(md.received)}</td>
-        <td class="nm" style="font-weight:700">${sM.ar}</td>
-        <td class="nm" style="font-weight:700">${sM.over}</td>
+        <td class="nm ar-mcell" style="color:var(--R)" onclick="toggleARYMDetail('${y}','${m}','pay',event)">${fmt(md.pay)}</td>
+        <td class="nm ar-mcell" style="color:var(--G)" onclick="toggleARYMDetail('${y}','${m}','fee',event)">${fmt(md.fee)}</td>
+        <td class="nm ar-mcell" style="color:var(--P);font-weight:600" onclick="toggleARYMDetail('${y}','${m}','expected',event)">${fmt(md.expected)}</td>
+        <td class="nm ar-mcell" style="color:var(--P)" onclick="toggleARYMDetail('${y}','${m}','received',event)">${fmt(md.received)}</td>
+        <td class="nm ar-mcell" style="font-weight:700" onclick="toggleARYMDetail('${y}','${m}','ar',event)">${sM.ar}</td>
+        <td class="nm ar-mcell" style="font-weight:700" onclick="toggleARYMDetail('${y}','${m}','over',event)">${sM.over}</td>
       </tr>`;
     }).join('');
     const sY = fmtARSplit(netY);
     return `<tr style="background:var(--sf2);cursor:pointer;font-weight:700" onclick="toggleARYear('${y}')">
         <td>${y}년 <span id="ar-yr-arrow-${y}" style="display:inline-block;font-size:10px;color:var(--t3)">${yi===0?'▼':'▶'}</span></td>
         <td style="text-align:center">${yd.count}</td>
-        <td class="nm" style="color:var(--R)">${fmt(yd.pay)}</td>
-        <td class="nm" style="color:var(--G)">${fmt(yd.fee)}</td>
-        <td class="nm" style="color:var(--P)">${fmt(yd.expected)}</td>
-        <td class="nm" style="color:var(--P)">${fmt(yd.received)}</td>
-        <td class="nm">${sY.ar}</td>
-        <td class="nm">${sY.over}</td>
+        <td class="nm ar-mcell" style="color:var(--R)" onclick="toggleARYMDetail('${y}','','pay',event)">${fmt(yd.pay)}</td>
+        <td class="nm ar-mcell" style="color:var(--G)" onclick="toggleARYMDetail('${y}','','fee',event)">${fmt(yd.fee)}</td>
+        <td class="nm ar-mcell" style="color:var(--P)" onclick="toggleARYMDetail('${y}','','expected',event)">${fmt(yd.expected)}</td>
+        <td class="nm ar-mcell" style="color:var(--P)" onclick="toggleARYMDetail('${y}','','received',event)">${fmt(yd.received)}</td>
+        <td class="nm ar-mcell" onclick="toggleARYMDetail('${y}','','ar',event)">${sY.ar}</td>
+        <td class="nm ar-mcell" onclick="toggleARYMDetail('${y}','','over',event)">${sY.over}</td>
       </tr>${monthRows}`;
   }).join('');
   const netG = grand.expected - grand.received;
@@ -3907,15 +3910,129 @@ function renderARYearlyMonthlyTable(){
       ${body}
       <tr style="background:var(--sf2);font-weight:700;border-top:2px solid var(--bd)">
         <td colspan="2" style="text-align:left">전체 합계</td>
-        <td class="nm" style="color:var(--R)">${fmt(grand.pay)}</td>
-        <td class="nm" style="color:var(--G)">${fmt(grand.fee)}</td>
-        <td class="nm" style="color:var(--P)">${fmt(grand.expected)}</td>
-        <td class="nm" style="color:var(--P)">${fmt(grand.received)}</td>
-        <td class="nm">${sG.ar}</td>
-        <td class="nm">${sG.over}</td>
+        <td class="nm ar-mcell" style="color:var(--R)" onclick="toggleARYMDetail('','','pay',event)">${fmt(grand.pay)}</td>
+        <td class="nm ar-mcell" style="color:var(--G)" onclick="toggleARYMDetail('','','fee',event)">${fmt(grand.fee)}</td>
+        <td class="nm ar-mcell" style="color:var(--P)" onclick="toggleARYMDetail('','','expected',event)">${fmt(grand.expected)}</td>
+        <td class="nm ar-mcell" style="color:var(--P)" onclick="toggleARYMDetail('','','received',event)">${fmt(grand.received)}</td>
+        <td class="nm ar-mcell" onclick="toggleARYMDetail('','','ar',event)">${sG.ar}</td>
+        <td class="nm ar-mcell" onclick="toggleARYMDetail('','','over',event)">${sG.over}</td>
       </tr>
     </tbody></table>
-    <div style="padding:8px 14px;font-size:11px;color:var(--t3);border-top:1px solid var(--bd)">연도 행 클릭 시 월별 펼치기/접기 · 월 행 클릭 시 아래 상세 목록이 해당 월로 필터링됩니다. (기준: 지급일자 / 실입금은 거래일자) · <b>미수금</b>은 아직 못 받은 금액, <b>과입금</b>은 예상보다 더 받은 금액입니다.</div>`;
+    <div style="padding:8px 14px;font-size:11px;color:var(--t3);border-top:1px solid var(--bd)">연도 행(라벨) 클릭 시 월별 펼치기/접기 · 월 행(라벨) 클릭 시 아래 상세 목록이 해당 월로 필터링됩니다 · <b>지급급여·수수료·예상매출액·실입금·미수금·과입금 숫자를 클릭</b>하면 바로 아래에 해당 내역이 펼쳐지고, 같은 숫자를 다시 클릭하거나 내역 상단의 <b>✕ 접기</b>를 누르면 숨겨집니다. (기준: 지급일자 / 실입금은 거래일자) · <b>미수금</b>은 아직 못 받은 금액, <b>과입금</b>은 예상보다 더 받은 금액입니다.</div>`;
+}
+let arYMDetailKey = null;
+const AR_METRIC_LABEL = { pay:'지급급여', fee:'수수료', expected:'예상매출액', received:'실입금액', ar:'미수금', over:'과입금' };
+/* 연도/월별 요약표의 숫자(지급급여·수수료·예상매출액·실입금·미수금·과입금) 클릭 시 상세 내역 펼치기/접기.
+   y, m 이 빈 문자열이면 해당 범위 전체(연도 전체 또는 전체 기간)를 의미한다. */
+function toggleARYMDetail(y, m, metric, ev) {
+  if (ev) ev.stopPropagation();
+  const panel = document.getElementById('ar-ym-detail');
+  if (!panel) return;
+  const key = `${y}|${m}|${metric}`;
+  if (arYMDetailKey === key) {
+    closeARYMDetail();
+    return;
+  }
+  arYMDetailKey = key;
+  panel.innerHTML = buildARYMDetailHTML(y, m, metric);
+  panel.style.display = '';
+  panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+function closeARYMDetail() {
+  arYMDetailKey = null;
+  const panel = document.getElementById('ar-ym-detail');
+  if (panel) { panel.style.display = 'none'; panel.innerHTML = ''; }
+}
+function buildARYMDetailHTML(y, m, metric) {
+  const periodLabel = y ? `${y}년${m ? ` ${Number(m)}월` : ''}` : '전체 기간';
+  const payRows = expReqs.filter(t => t.acct === '급여' && Number(t.expectedRev || 0) > 0
+      && (!y || (t.payDate || '').slice(0, 4) === y)
+      && (!m || (t.payDate || '').slice(5, 7) === m))
+    .sort((a, b) => b.payDate.localeCompare(a.payDate));
+  const incRows = ledger.filter(t => t.type === 'income' && t.acct === '매출액'
+      && (!y || (t.date || '').slice(0, 4) === y)
+      && (!m || (t.date || '').slice(5, 7) === m))
+    .sort((a, b) => b.date.localeCompare(a.date));
+  const makeStatusBadge = s => `<span class="badge ${expStatusClass[s] || 'est-wait'}">${s}</span>`;
+
+  const payTable = (hi) => `
+    <div class="tw"><table>
+      <thead><tr>
+        <th style="width:88px">지급일자</th>
+        <th>제목</th>
+        <th style="width:90px">수취인</th>
+        <th style="width:100px">업체</th>
+        <th style="width:60px;text-align:center">간병일수</th>
+        <th style="width:90px;text-align:right">수수료(원)</th>
+        <th style="width:110px;text-align:right">지급급여(원)</th>
+        <th style="width:120px;text-align:right">예상매출액(원)</th>
+        <th style="width:74px;text-align:center">상태</th>
+      </tr></thead>
+      <tbody>
+        ${payRows.length ? payRows.map(t => `<tr>
+            <td class="dn">${t.payDate}</td>
+            <td style="font-size:12.5px;cursor:pointer;font-weight:500" onclick="openExpView(${t.id})">${t.title}</td>
+            <td style="font-size:12px;font-weight:500">${t.payee || '-'}</td>
+            <td style="font-size:12px;color:var(--t2)">${t.client || '-'}</td>
+            <td style="text-align:center;font-size:12px">${t.careDays || '-'}</td>
+            <td class="nm" style="${hi === 'fee' ? 'color:var(--G);font-weight:700' : 'color:var(--t3)'}">${fmt(Number(t.careDays || 0) * 5000)}</td>
+            <td class="nm" style="${hi === 'pay' ? 'color:var(--R);font-weight:700' : ''}">${fmt(t.amount)}</td>
+            <td class="nm" style="${hi === 'expected' ? 'color:var(--P);font-weight:700' : 'color:var(--t3)'}">${fmt(t.expectedRev)}</td>
+            <td style="text-align:center">${makeStatusBadge(t.status)}</td>
+          </tr>`).join('') : `<tr><td colspan="9" style="text-align:center;color:var(--tm);padding:16px">${periodLabel}에 해당하는 지급건이 없습니다</td></tr>`}
+      </tbody>
+    </table></div>`;
+
+  const incTable = (hi) => `
+    <div class="tw"><table>
+      <thead><tr>
+        <th style="width:88px">거래일자</th>
+        <th>내용</th>
+        <th style="width:140px">매출처</th>
+        <th style="width:120px;text-align:right">입금액(원)</th>
+      </tr></thead>
+      <tbody>
+        ${incRows.length ? incRows.map(t => `<tr>
+            <td class="dn">${t.date}</td>
+            <td style="font-size:12.5px">${t.desc}</td>
+            <td style="font-size:12px;color:var(--P)">${t.partner || '-'}</td>
+            <td class="nm" style="${hi ? 'color:var(--P);font-weight:700' : 'color:var(--G)'}">${fmt(t.amount)}</td>
+          </tr>`).join('') : `<tr><td colspan="4" style="text-align:center;color:var(--tm);padding:16px">${periodLabel}에 해당하는 입금 내역이 없습니다</td></tr>`}
+      </tbody>
+    </table></div>`;
+
+  let body, countLabel;
+  if (metric === 'pay' || metric === 'fee' || metric === 'expected') {
+    body = payTable(metric);
+    countLabel = `${payRows.length}건`;
+  } else if (metric === 'received') {
+    body = incTable(true);
+    countLabel = `${incRows.length}건`;
+  } else {
+    // 미수금(ar) / 과입금(over): 예상매출액과 실입금 내역을 함께 보여준다
+    const expectedSum = payRows.reduce((s, t) => s + Number(t.expectedRev || 0), 0);
+    const receivedSum = incRows.reduce((s, t) => s + Number(t.amount || 0), 0);
+    const net = expectedSum - receivedSum;
+    const netLabel = net > 0 ? `미수금 ${fmt(net)}원` : net < 0 ? `과입금 ${fmt(Math.abs(net))}원` : '정산완료 (0원)';
+    body = `
+      <div style="padding:10px 14px;font-size:12px;color:var(--t2);background:var(--sf2);border-bottom:1px solid var(--bd)">
+        예상매출액 ${fmt(expectedSum)}원 − 실입금 ${fmt(receivedSum)}원 = <b style="color:${net > 0 ? 'var(--R)' : net < 0 ? 'var(--P)' : 'var(--G)'}">${netLabel}</b>
+      </div>
+      <div style="padding:10px 14px 4px;font-size:11.5px;font-weight:700;color:var(--P)">📋 예상매출액 내역 (${payRows.length}건)</div>
+      ${payTable('expected')}
+      <div style="padding:10px 14px 4px;font-size:11.5px;font-weight:700;color:var(--G)">💳 실입금 내역 (${incRows.length}건)</div>
+      ${incTable(false)}`;
+    countLabel = `${payRows.length + incRows.length}건`;
+  }
+
+  return `
+    <div style="border-top:2px solid var(--bd)">
+      <div class="ch" style="background:var(--PU)">
+        <span class="ct" style="color:var(--P)">🔍 ${periodLabel} · ${AR_METRIC_LABEL[metric]} 내역 <span style="font-weight:400;color:var(--t3);font-size:11px">(${countLabel})</span></span>
+        <button class="btn sm" onclick="closeARYMDetail()">✕ 접기</button>
+      </div>
+      ${body}
+    </div>`;
 }
 /* 외상매출금 현황 렌더 */
 function renderExpAR() {
@@ -3981,6 +4098,7 @@ function renderExpAR() {
     <div class="card" style="margin-bottom:12px">
       <div class="ch"><span class="ct">📅 연도별/월별 외상매출금 · 수수료 요약</span></div>
       <div class="tw">${renderARYearlyMonthlyTable()}</div>
+      <div id="ar-ym-detail" style="display:none"></div>
     </div>
 
     <!-- 오입금 의심 입금 내역 -->
