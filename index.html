@@ -3685,21 +3685,133 @@ function renderCurrentProfit(d) {
   </div>`;
 }
 
+/* 외상매출금 필터 상태 (연도/월) */
+let arYrF = '', arMoF = '';
+function setARFilter(){
+  arYrF = document.getElementById('ar-yr-f')?.value || '';
+  arMoF = document.getElementById('ar-mo-f')?.value || '';
+  renderExpAR();
+}
+function clearARFilter(){ arYrF=''; arMoF=''; renderExpAR(); }
+function filterARByPeriod(y, m){
+  arYrF = y||''; arMoF = m||'';
+  renderExpAR();
+  document.getElementById('ar-detail-anchor')?.scrollIntoView({behavior:'smooth', block:'start'});
+}
+function toggleARYear(y){
+  const rows = document.querySelectorAll('.ar-yr-row-'+y);
+  if(!rows.length) return;
+  const show = rows[0].style.display === 'none';
+  rows.forEach(r=> r.style.display = show ? '' : 'none');
+  const arrow = document.getElementById('ar-yr-arrow-'+y);
+  if(arrow) arrow.textContent = show ? '▼' : '▶';
+}
+/* 연도별/월별 예상매출액·수수료·실입금 집계 (필터와 무관하게 항상 전체 기간 기준) */
+function computeARYearlyMonthly(){
+  const payAll = expReqs.filter(t => t.acct==='급여' && Number(t.expectedRev||0) > 0);
+  const incAll = ledger.filter(t => t.type==='income' && t.acct==='매출액');
+  const map = {};
+  const ensure = (y,m) => {
+    map[y] = map[y] || { months:{}, count:0, pay:0, fee:0, expected:0, received:0 };
+    if(m!=null){
+      map[y].months[m] = map[y].months[m] || { count:0, pay:0, fee:0, expected:0, received:0 };
+    }
+  };
+  payAll.forEach(t => {
+    const y = (t.payDate||'').slice(0,4), m = (t.payDate||'').slice(5,7);
+    if(!y || !m) return;
+    ensure(y,m);
+    const fee = Number(t.careDays||0)*5000;
+    map[y].count++; map[y].pay += Number(t.amount||0); map[y].fee += fee; map[y].expected += Number(t.expectedRev||0);
+    map[y].months[m].count++; map[y].months[m].pay += Number(t.amount||0); map[y].months[m].fee += fee; map[y].months[m].expected += Number(t.expectedRev||0);
+  });
+  incAll.forEach(t => {
+    const y = (t.date||'').slice(0,4), m = (t.date||'').slice(5,7);
+    if(!y || !m) return;
+    ensure(y,m);
+    map[y].received += Number(t.amount||0);
+    map[y].months[m].received += Number(t.amount||0);
+  });
+  return map;
+}
+function renderARYearlyMonthlyTable(){
+  const map = computeARYearlyMonthly();
+  const years = Object.keys(map).sort((a,b)=>b.localeCompare(a));
+  if(!years.length) return `<div style="padding:16px;text-align:center;color:var(--tm);font-size:12.5px">데이터가 없습니다</div>`;
+  let grand = { pay:0, fee:0, expected:0, received:0 };
+  const body = years.map((y, yi) => {
+    const yd = map[y];
+    const netY = Math.max(yd.expected - yd.received, 0);
+    grand.pay += yd.pay; grand.fee += yd.fee; grand.expected += yd.expected; grand.received += yd.received;
+    const months = Object.keys(yd.months).sort((a,b)=>b.localeCompare(a));
+    const monthRows = months.map(m => {
+      const md = yd.months[m];
+      const netM = Math.max(md.expected - md.received, 0);
+      return `<tr class="ar-yr-row-${y}" style="display:${yi===0?'':'none'};cursor:pointer" onclick="filterARByPeriod('${y}','${m}')">
+        <td style="padding-left:26px;color:var(--t2)">${y}-${m}</td>
+        <td style="text-align:center">${md.count}</td>
+        <td class="nm exp">${fmt(md.pay)}</td>
+        <td class="nm" style="color:var(--P)">${fmt(md.fee)}</td>
+        <td class="nm" style="color:var(--P);font-weight:600">${fmt(md.expected)}</td>
+        <td class="nm inc">${fmt(md.received)}</td>
+        <td class="nm" style="color:${netM>0?'var(--O)':'var(--G)'};font-weight:700">${fmt(netM)}</td>
+      </tr>`;
+    }).join('');
+    return `<tr style="background:var(--sf2);cursor:pointer;font-weight:700" onclick="toggleARYear('${y}')">
+        <td>${y}년 <span id="ar-yr-arrow-${y}" style="display:inline-block;font-size:10px;color:var(--t3)">${yi===0?'▼':'▶'}</span></td>
+        <td style="text-align:center">${yd.count}</td>
+        <td class="nm exp">${fmt(yd.pay)}</td>
+        <td class="nm" style="color:var(--P)">${fmt(yd.fee)}</td>
+        <td class="nm" style="color:var(--P)">${fmt(yd.expected)}</td>
+        <td class="nm inc">${fmt(yd.received)}</td>
+        <td class="nm" style="color:${netY>0?'var(--O)':'var(--G)'}">${fmt(netY)}</td>
+      </tr>${monthRows}`;
+  }).join('');
+  const netG = Math.max(grand.expected - grand.received, 0);
+  return `<table><thead><tr>
+      <th style="text-align:left">연도/월</th>
+      <th style="width:56px;text-align:center">건수</th>
+      <th style="width:110px;text-align:right">지급급여(원)</th>
+      <th style="width:100px;text-align:right">수수료(원)</th>
+      <th style="width:120px;text-align:right">예상매출액(원)</th>
+      <th style="width:110px;text-align:right">실입금(원)</th>
+      <th style="width:110px;text-align:right">미수금(원)</th>
+    </tr></thead><tbody>
+      ${body}
+      <tr style="background:var(--sf2);font-weight:700;border-top:2px solid var(--bd)">
+        <td colspan="2" style="text-align:left">전체 합계</td>
+        <td class="nm exp">${fmt(grand.pay)}</td>
+        <td class="nm" style="color:var(--P)">${fmt(grand.fee)}</td>
+        <td class="nm" style="color:var(--P)">${fmt(grand.expected)}</td>
+        <td class="nm inc">${fmt(grand.received)}</td>
+        <td class="nm" style="color:${netG>0?'var(--O)':'var(--G)'}">${fmt(netG)}</td>
+      </tr>
+    </tbody></table>
+    <div style="padding:8px 14px;font-size:11px;color:var(--t3);border-top:1px solid var(--bd)">연도 행 클릭 시 월별 펼치기/접기 · 월 행 클릭 시 아래 상세 목록이 해당 월로 필터링됩니다. (기준: 지급일자 / 실입금은 거래일자)</div>`;
+}
 /* 외상매출금 현황 렌더 */
 function renderExpAR() {
-  // 급여 지급건만 예상매출액으로 집계
-  const totalExpected = expReqs
-    .filter(t => t.acct==='급여' && Number(t.expectedRev||0) > 0)
-    .reduce((s,t) => s+Number(t.expectedRev||0), 0);
-  const totalReceived = ledger
-    .filter(t => t.type==='income' && t.acct==='매출액')
-    .reduce((s,t) => s+Number(t.amount||0), 0);
-  const netAR = Math.max(totalExpected - totalReceived, 0);
+  // 연도/월 필터 적용: 지급건은 지급일자(payDate), 입금건은 거래일자(date) 기준
+  const payReqsAll = expReqs.filter(t => t.acct==='급여' && Number(t.expectedRev||0) > 0);
+  const incomeAll  = ledger.filter(t => t.type==='income' && t.acct==='매출액');
+  const yrOpts = [...new Set(payReqsAll.map(t=>(t.payDate||'').slice(0,4)).filter(Boolean))].sort((a,b)=>b.localeCompare(a));
 
-  const rows = expReqs
-    .filter(t => t.acct==='급여' && Number(t.expectedRev||0) > 0)
+  const rows = payReqsAll
+    .filter(t => !arYrF || (t.payDate||'').slice(0,4)===arYrF)
+    .filter(t => !arMoF || (t.payDate||'').slice(5,7)===arMoF)
     .sort((a,b) => b.payDate.localeCompare(a.payDate));
+  const incomeRows = incomeAll
+    .filter(t => !arYrF || (t.date||'').slice(0,4)===arYrF)
+    .filter(t => !arMoF || (t.date||'').slice(5,7)===arMoF)
+    .sort((a,b) => b.date.localeCompare(a.date));
 
+  const totalExpected = rows.reduce((s,t) => s+Number(t.expectedRev||0), 0);
+  const totalFee = rows.reduce((s,t) => s+Number(t.careDays||0)*5000, 0);
+  const totalReceived = incomeRows.reduce((s,t) => s+Number(t.amount||0), 0);
+  const netAR = Math.max(totalExpected - totalReceived, 0);
+  const periodLabel = arYrF ? `${arYrF}년${arMoF?` ${Number(arMoF)}월`:''}` : '전체 기간';
+
+  // 환자·간병인별 입금 대조는 기간 필터와 무관하게 항상 전체 데이터 기준(교차월 매칭 특성상)
   const arMatch = computeARMatching();
   const matchStatusColor = { '완납':'var(--G)', '부분입금':'var(--O)', '미입금':'var(--R)' };
   const matchStatusBg    = { '완납':'#F0FDF4', '부분입금':'#FFF7ED', '미입금':'#FEF2F2' };
@@ -3708,11 +3820,31 @@ function renderExpAR() {
   const suspReviewed = susp.filter(s => s.reviewed);
 
   const html = `
+    <!-- 연도/월 필터 -->
+    <div class="fb" style="margin-bottom:10px;align-items:center">
+      <select class="fs" id="ar-yr-f" onchange="setARFilter()" style="width:100px">
+        <option value="">전체 연도</option>
+        ${yrOpts.map(y=>`<option value="${y}"${arYrF===y?' selected':''}>${y}년</option>`).join('')}
+      </select>
+      <select class="fs" id="ar-mo-f" onchange="setARFilter()" style="width:86px">
+        <option value="">전체 월</option>
+        ${['01','02','03','04','05','06','07','08','09','10','11','12'].map(m=>`<option value="${m}"${arMoF===m?' selected':''}>${Number(m)}월</option>`).join('')}
+      </select>
+      ${(arYrF||arMoF) ? `<button class="btn sm" onclick="clearARFilter()">✕ 필터 초기화</button><span style="font-size:12px;color:var(--t3);margin-left:4px">— ${periodLabel} 기준</span>` : `<span style="font-size:12px;color:var(--t3);margin-left:4px">전체 기간 기준</span>`}
+    </div>
+
     <!-- 요약 카드 -->
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px">
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">
       <div class="sc"><div class="sc-l">예상매출액 합계</div><div class="sc-v bal">₩${fmt(totalExpected)}</div></div>
+      <div class="sc"><div class="sc-l" style="color:var(--P);font-weight:700">수수료 합계</div><div class="sc-v" style="color:var(--P);font-size:18px;font-weight:700">₩${fmt(totalFee)}</div></div>
       <div class="sc"><div class="sc-l">실 입금 매출액</div><div class="sc-v inc">₩${fmt(totalReceived)}</div></div>
       <div class="sc"><div class="sc-l" style="color:var(--O);font-weight:700">외상매출금 (미수금)</div><div class="sc-v" style="color:var(--O);font-size:18px;font-weight:700">₩${fmt(netAR)}</div></div>
+    </div>
+
+    <!-- 연도별/월별 요약 -->
+    <div class="card" style="margin-bottom:12px">
+      <div class="ch"><span class="ct">📅 연도별/월별 외상매출금 · 수수료 요약</span></div>
+      <div class="tw">${renderARYearlyMonthlyTable()}</div>
     </div>
 
     <!-- 오입금 의심 입금 내역 -->
@@ -3832,8 +3964,8 @@ function renderExpAR() {
     </div>
 
     <!-- 지출결의서별 예상매출액 목록 -->
-    <div class="card">
-      <div class="ch"><span class="ct">📋 지출결의서별 예상매출액 내역</span></div>
+    <div class="card" id="ar-detail-anchor">
+      <div class="ch"><span class="ct">📋 지출결의서별 예상매출액 내역 <span style="font-weight:400;color:var(--t3);font-size:11.5px">(${periodLabel})</span></span></div>
       <div class="tw"><table>
         <thead><tr>
           <th style="width:88px">지급일자</th>
@@ -3841,12 +3973,13 @@ function renderExpAR() {
           <th style="width:90px">수취인</th>
           <th style="width:100px">업체</th>
           <th style="width:60px;text-align:center">간병일수</th>
+          <th style="width:90px;text-align:right">수수료(원)</th>
           <th style="width:110px;text-align:right">지급 급여(원)</th>
           <th style="width:120px;text-align:right">예상매출액(원)</th>
           <th style="width:74px;text-align:center">상태</th>
         </tr></thead>
         <tbody>
-          ${rows.map(t => {
+          ${rows.length ? rows.map(t => {
             const makeStatusBadge = s=>`<span class="badge ${expStatusClass[s]||'est-wait'}">${s}</span>`;
             return `<tr>
               <td class="dn">${t.payDate}</td>
@@ -3854,14 +3987,16 @@ function renderExpAR() {
               <td style="font-size:12px;font-weight:500">${t.payee||'-'}</td>
               <td style="font-size:12px;color:var(--t2)">${t.client||'-'}</td>
               <td style="text-align:center;font-size:12px">${t.careDays||'-'}</td>
+              <td class="nm" style="color:var(--P)">${fmt(Number(t.careDays||0)*5000)}</td>
               <td class="nm exp">${fmt(t.amount)}</td>
               <td class="nm" style="color:var(--P);font-weight:600">${fmt(t.expectedRev)}</td>
               <td style="text-align:center">${makeStatusBadge(t.status)}</td>
             </tr>`;
-          }).join('')}
+          }).join('') : `<tr><td colspan="9" style="text-align:center;color:var(--tm);padding:20px">${periodLabel}에 해당하는 지급건이 없습니다</td></tr>`}
           <tr style="background:var(--sf2);font-weight:700">
             <td colspan="5" style="text-align:right;padding:8px 10px">합계</td>
-            <td class="nm exp">${fmt(expReqs.filter(t=>t.acct==='급여'&&Number(t.expectedRev||0)>0).reduce((s,t)=>s+Number(t.amount||0),0))}</td>
+            <td class="nm" style="color:var(--P)">${fmt(totalFee)}</td>
+            <td class="nm exp">${fmt(rows.reduce((s,t)=>s+Number(t.amount||0),0))}</td>
             <td class="nm" style="color:var(--P)">${fmt(totalExpected)}</td>
             <td></td>
           </tr>
@@ -3871,7 +4006,7 @@ function renderExpAR() {
 
     <!-- 실 입금 매출액 목록 -->
     <div class="card" style="margin-top:12px">
-      <div class="ch"><span class="ct">💳 실 입금 매출액 내역 (입출금내역 매출액 계정)</span></div>
+      <div class="ch"><span class="ct">💳 실 입금 매출액 내역 (입출금내역 매출액 계정) <span style="font-weight:400;color:var(--t3);font-size:11.5px">(${periodLabel})</span></span></div>
       <div class="tw"><table>
         <thead><tr>
           <th style="width:88px">거래일자</th>
@@ -3880,13 +4015,12 @@ function renderExpAR() {
           <th style="width:120px;text-align:right">입금액(원)</th>
         </tr></thead>
         <tbody>
-          ${ledger.filter(t=>t.type==='income'&&t.acct==='매출액').sort((a,b)=>b.date.localeCompare(a.date))
-            .map(t=>`<tr>
+          ${incomeRows.length ? incomeRows.map(t=>`<tr>
               <td class="dn">${t.date}</td>
               <td style="font-size:12.5px">${t.desc}</td>
               <td style="font-size:12px;color:var(--P)">${t.partner||'-'}</td>
               <td class="nm inc">${fmt(t.amount)}</td>
-            </tr>`).join('') || '<tr><td colspan="4" style="text-align:center;color:var(--tm);padding:20px">입금된 매출액 내역 없음</td></tr>'}
+            </tr>`).join('') : `<tr><td colspan="4" style="text-align:center;color:var(--tm);padding:20px">${periodLabel}에 해당하는 입금된 매출액 내역 없음</td></tr>`}
           <tr style="background:var(--sf2);font-weight:700">
             <td colspan="3" style="text-align:right;padding:8px 10px">실 입금 합계</td>
             <td class="nm inc">${fmt(totalReceived)}</td>
@@ -3896,7 +4030,7 @@ function renderExpAR() {
     </div>
 
     <div style="margin-top:10px;padding:10px 14px;background:${netAR>0?'#FFF7ED':'#F0FDF4'};border:1px solid ${netAR>0?'#FCD34D':'#86EFAC'};border-radius:6px;font-size:12px;color:${netAR>0?'#92400E':'#166534'}">
-      <strong>외상매출금 = 예상매출액 합계 (${fmt(totalExpected)}원) - 실 입금 매출액 (${fmt(totalReceived)}원) = ${fmt(netAR)}원</strong>
+      <strong>[${periodLabel}] 외상매출금 = 예상매출액 합계 (${fmt(totalExpected)}원) - 실 입금 매출액 (${fmt(totalReceived)}원) = ${fmt(netAR)}원 <span style="font-weight:400">(이 중 수수료 ${fmt(totalFee)}원 포함)</span></strong>
       ${netAR>0?'<br>아직 수령하지 못한 미수금이 있습니다.':'<br>모든 외상매출금이 수령 완료되었습니다.'}
     </div>`;
 
@@ -4028,11 +4162,24 @@ function arExport(fmt2) {
   const matchHdr = ['환자명','간병인명(수취인)','지급건수','지급 예상매출액(원)','입금건수','실입금액(원)','차액(원)','최근입금일','상태'];
   const matchData = matchRows.map(g => [g.patient||'(미확인)', g.caregiver, g.payCount, g.expectedTotal, g.recvCount, g.receivedTotal, g.diff, g.lastRecvDate||'', g.status]);
 
-  const payHdr = ['지급일자','기안일자','제목','환자명(추출)','수취인(간병인)','간병일수','지급금액(원)','예상매출액(원)','업체','상태'];
-  const payData = payReqs.map(t => [t.payDate, t.draftDate, t.title, extractPatientName(t.title)||'', t.payee, t.careDays||'', t.amount, t.expectedRev||0, t.client||'', t.status]);
+  const payHdr = ['지급일자','기안일자','제목','환자명(추출)','수취인(간병인)','간병일수','수수료(원)','지급금액(원)','예상매출액(원)','업체','상태'];
+  const payData = payReqs.map(t => [t.payDate, t.draftDate, t.title, extractPatientName(t.title)||'', t.payee, t.careDays||'', Number(t.careDays||0)*5000, t.amount, t.expectedRev||0, t.client||'', t.status]);
 
   const recvHdr = ['거래일자','내용','매출처','입금액(원)'];
   const recvData = incomeRows.map(t => [t.date, t.desc, t.partner||'', t.amount]);
+
+  // 연도별/월별 요약 (수수료 포함)
+  const yrMoMap = computeARYearlyMonthly();
+  const yrMoHdr = ['연도','월','건수','지급급여(원)','수수료(원)','예상매출액(원)','실입금(원)','미수금(원)'];
+  const yrMoData = [];
+  Object.keys(yrMoMap).sort((a,b)=>a.localeCompare(b)).forEach(y => {
+    const yd = yrMoMap[y];
+    Object.keys(yd.months).sort((a,b)=>a.localeCompare(b)).forEach(m => {
+      const md = yd.months[m];
+      yrMoData.push([y, m, md.count, md.pay, md.fee, md.expected, md.received, Math.max(md.expected-md.received,0)]);
+    });
+    yrMoData.push([y, '소계', yd.count, yd.pay, yd.fee, yd.expected, yd.received, Math.max(yd.expected-yd.received,0)]);
+  });
 
   const susp = computeSuspiciousDeposits();
   const suspHdr = ['거래일자','내용','거래처','입금액(원)','의심금액(원)','사유','처리상태','처리결과','연결된 환불출금일','연결된 환불출금액(원)'];
@@ -4048,6 +4195,8 @@ function arExport(fmt2) {
     const out = [
       section('■ 환자·간병인별 입금 대조 요약', matchHdr, matchData),
       '',
+      section('■ 연도별/월별 요약 (수수료 포함)', yrMoHdr, yrMoData),
+      '',
       section('■ 지급 내역 (우리 협회 → 간병인 급여)', payHdr, payData),
       '',
       section('■ 입금 내역 (업체 → 우리 협회 매출)', recvHdr, recvData),
@@ -4062,8 +4211,12 @@ function arExport(fmt2) {
     ws1['!cols'] = [{wch:12},{wch:14},{wch:10},{wch:16},{wch:10},{wch:14},{wch:12},{wch:12},{wch:10}];
     XLSX.utils.book_append_sheet(wb, ws1, '입금대조요약');
 
+    const wsYM = XLSX.utils.aoa_to_sheet([yrMoHdr, ...yrMoData]);
+    wsYM['!cols'] = [{wch:8},{wch:8},{wch:8},{wch:13},{wch:12},{wch:14},{wch:13},{wch:13}];
+    XLSX.utils.book_append_sheet(wb, wsYM, '연도별월별요약');
+
     const ws2 = XLSX.utils.aoa_to_sheet([payHdr, ...payData]);
-    ws2['!cols'] = [{wch:12},{wch:12},{wch:26},{wch:12},{wch:14},{wch:10},{wch:13},{wch:14},{wch:14},{wch:10}];
+    ws2['!cols'] = [{wch:12},{wch:12},{wch:26},{wch:12},{wch:14},{wch:10},{wch:12},{wch:13},{wch:14},{wch:14},{wch:10}];
     XLSX.utils.book_append_sheet(wb, ws2, '지급내역(협회)');
 
     const ws3 = XLSX.utils.aoa_to_sheet([recvHdr, ...recvData]);
