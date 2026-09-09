@@ -3357,10 +3357,11 @@ function computeARMatching() {
     const key = patient
       ? `${patientMatchKey(patient)}|${caregiverMatchKey(t.payee)}`
       : `__UNMATCHED__${t.id}`; // 환자명 미인식 건은 서로 합산되지 않도록 건별 고유 키 사용
-    if(!groups[key]) groups[key] = { patient, caregiver: (t.payee||'').trim(), expectedTotal:0, payCount:0, payIds:[], receivedTotal:0, recvCount:0, recvDates:[], recvRows:[] };
+    if(!groups[key]) groups[key] = { patient, caregiver: (t.payee||'').trim(), expectedTotal:0, payCount:0, payIds:[], payDates:[], receivedTotal:0, recvCount:0, recvDates:[], recvRows:[] };
     groups[key].expectedTotal += Number(t.expectedRev||0);
     groups[key].payCount += 1;
     groups[key].payIds.push(t.id);
+    groups[key].payDates.push(t.payDate||'');
   });
 
   // 매칭 안 된(제목에서 환자명을 못 뽑은) 건은 별도 표시를 위해 unmatched 리스트도 유지
@@ -3687,6 +3688,29 @@ function renderCurrentProfit(d) {
 
 /* 외상매출금 필터 상태 (연도/월) */
 let arYrF = '', arMoF = '';
+/* 환자·간병인별 입금 대조 목록: 자체 연도/월 검색 필터 + 접기/펴기 상태 (기본값: 접힘) */
+let arMatchYrF = '', arMatchMoF = '';
+let arMatchCollapsed = true;
+function setARMatchFilter(){
+  arMatchYrF = document.getElementById('ar-match-yr-f')?.value || '';
+  arMatchMoF = document.getElementById('ar-match-mo-f')?.value || '';
+  renderExpAR();
+}
+function clearARMatchFilter(){ arMatchYrF=''; arMatchMoF=''; renderExpAR(); }
+function arMatchDateInPeriod(dateStr){
+  if(!dateStr) return false;
+  const y = dateStr.slice(0,4), m = dateStr.slice(5,7);
+  if(arMatchYrF && y!==arMatchYrF) return false;
+  if(arMatchMoF && m!==arMatchMoF) return false;
+  return true;
+}
+function toggleARMatchSection(){
+  arMatchCollapsed = !arMatchCollapsed;
+  const body = document.getElementById('ar-match-body');
+  const icon = document.getElementById('ar-match-icon');
+  if(body) body.style.display = arMatchCollapsed ? 'none' : '';
+  if(icon) icon.textContent = arMatchCollapsed ? '▼ 펼치기' : '▲ 접기';
+}
 function setARFilter(){
   arYrF = document.getElementById('ar-yr-f')?.value || '';
   arMoF = document.getElementById('ar-mo-f')?.value || '';
@@ -3811,10 +3835,18 @@ function renderExpAR() {
   const netAR = Math.max(totalExpected - totalReceived, 0);
   const periodLabel = arYrF ? `${arYrF}년${arMoF?` ${Number(arMoF)}월`:''}` : '전체 기간';
 
-  // 환자·간병인별 입금 대조는 기간 필터와 무관하게 항상 전체 데이터 기준(교차월 매칭 특성상)
+  // 환자·간병인별 입금 대조 "매칭 계산" 자체는 기간 필터와 무관하게 항상 전체 데이터 기준(교차월 매칭 특성상).
+  // 단, 아래 목록에 표시할지 여부는 그룹의 지급일자 또는 입금일자 중 하나라도 선택한 연/월에 해당하면 노출하는 방식으로
+  // 자체 검색 필터(arMatchYrF/arMatchMoF)를 적용한다 (매칭 정합성은 그대로 유지).
   const arMatch = computeARMatching();
   const matchStatusColor = { '완납':'var(--G)', '부분입금':'var(--O)', '미입금':'var(--R)' };
   const matchStatusBg    = { '완납':'#F0FDF4', '부분입금':'#FFF7ED', '미입금':'#FEF2F2' };
+  const matchHasFilter = !!(arMatchYrF || arMatchMoF);
+  const matchRowsFiltered = !matchHasFilter ? arMatch.rows : arMatch.rows.filter(g =>
+    (g.payDates||[]).some(arMatchDateInPeriod) || (g.recvDates||[]).some(arMatchDateInPeriod)
+  );
+  const matchUnmatchedFiltered = !matchHasFilter ? arMatch.unmatchedPay : arMatch.unmatchedPay.filter(t => arMatchDateInPeriod(t.payDate));
+  const matchPeriodLabel = arMatchYrF ? `${arMatchYrF}년${arMatchMoF?` ${Number(arMatchMoF)}월`:''}` : '전체 기간';
   const susp = computeSuspiciousDeposits();
   const suspVisible = susp.filter(s => !s.reviewed);
   const suspReviewed = susp.filter(s => s.reviewed);
@@ -3917,49 +3949,64 @@ function renderExpAR() {
       </details>` : ''}
     </div>` : ''}
 
-    <!-- 환자·간병인 기준 입금 대조표 (핵심) -->
+    <!-- 환자·간병인 기준 입금 대조표 (핵심) — 기본 접힘, 자체 연도/월 검색 필터 포함 -->
     <div class="card" style="margin-bottom:12px">
-      <div class="ch" style="display:flex;justify-content:space-between;align-items:center">
+      <div class="ch" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
         <span class="ct">🔎 환자·간병인별 입금 대조 — 지급한 건에 대해 매출처 입금이 확인되는지 비교</span>
-        <div style="display:flex;gap:6px">
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <button class="btn sm" id="ar-match-icon" onclick="toggleARMatchSection()">${arMatchCollapsed ? '▼ 펼치기' : '▲ 접기'}</button>
+        </div>
+      </div>
+      <div id="ar-match-body" style="display:${arMatchCollapsed ? 'none' : ''}">
+        <div class="fb" style="padding:10px 14px 0;align-items:center">
+          <select class="fs" id="ar-match-yr-f" onchange="setARMatchFilter()" style="width:100px">
+            <option value="">전체 연도</option>
+            ${yrOpts.map(y=>`<option value="${y}"${arMatchYrF===y?' selected':''}>${y}년</option>`).join('')}
+          </select>
+          <select class="fs" id="ar-match-mo-f" onchange="setARMatchFilter()" style="width:86px">
+            <option value="">전체 월</option>
+            ${['01','02','03','04','05','06','07','08','09','10','11','12'].map(m=>`<option value="${m}"${arMatchMoF===m?' selected':''}>${Number(m)}월</option>`).join('')}
+          </select>
+          ${matchHasFilter ? `<button class="btn sm" onclick="clearARMatchFilter()">✕ 필터 초기화</button><span style="font-size:12px;color:var(--t3)">— ${matchPeriodLabel} 기준 (지급일자 또는 입금일자)</span>` : `<span style="font-size:12px;color:var(--t3)">전체 기간 기준</span>`}
+          <div style="flex:1"></div>
           <button class="btn sm" onclick="arExport('csv')">CSV↓</button>
           <button class="btn sm p" onclick="arExport('xl')">엑셀↓</button>
         </div>
-      </div>
-      <div class="tw"><table>
-        <thead><tr>
-          <th>환자명</th>
-          <th>간병인명(수취인)</th>
-          <th style="width:60px;text-align:center">지급건수</th>
-          <th style="width:120px;text-align:right">지급 예상매출액(원)</th>
-          <th style="width:60px;text-align:center">입금건수</th>
-          <th style="width:120px;text-align:right">실 입금액(원)</th>
-          <th style="width:100px;text-align:right">차액(원)</th>
-          <th style="width:90px">최근 입금일</th>
-          <th style="width:76px;text-align:center">상태</th>
-        </tr></thead>
-        <tbody>
-          ${arMatch.rows.length ? arMatch.rows.map(g => `
-            <tr style="background:${matchStatusBg[g.status]}">
-              <td style="font-weight:600">${g.patient||'<span style=\"color:var(--tm)\">(미확인)</span>'}</td>
-              <td>${g.caregiver||'-'}</td>
-              <td style="text-align:center">${g.payCount}</td>
-              <td class="nm" style="color:var(--P);font-weight:600">${fmt(g.expectedTotal)}</td>
-              <td style="text-align:center">${g.recvCount}</td>
-              <td class="nm inc">${fmt(g.receivedTotal)}</td>
-              <td class="nm" style="color:${g.diff>0?'var(--R)':'var(--G)'};font-weight:700">${fmt(g.diff)}</td>
-              <td class="dn">${g.lastRecvDate||'-'}</td>
-              <td style="text-align:center"><span style="font-weight:700;color:${matchStatusColor[g.status]}">${g.status}</span></td>
-            </tr>`).join('') : '<tr><td colspan="9" style="text-align:center;color:var(--tm);padding:20px">급여 지급건이 없습니다</td></tr>'}
-        </tbody>
-      </table></div>
-      ${arMatch.unmatchedPay.length ? `
-      <div style="padding:10px 14px;font-size:12px;color:var(--O);background:#FFF7ED;border-top:1px solid var(--bd)">
-        ⚠ 제목에서 환자명을 인식하지 못한 지급건 ${arMatch.unmatchedPay.length}건이 있습니다. 제목을 <b>간병비 입금(환자: 이름)</b> 형식으로 입력하면 자동으로 대조됩니다.
-        <br>${arMatch.unmatchedPay.map(t=>`「${t.title}」`).join(', ')}
-      </div>` : ''}
-      <div style="padding:8px 14px;font-size:11.5px;color:var(--t3);border-top:1px solid var(--bd)">
-        매칭 방식: 지출결의서 제목의 <b>환자명</b>과 수취인(<b>간병인명</b>)을, 입출금 내역 매출액 계정의 내용(예: 타행IB 환자명-간병인명)에서 추출한 이름과 대조합니다.
+        <div class="tw"><table>
+          <thead><tr>
+            <th>환자명</th>
+            <th>간병인명(수취인)</th>
+            <th style="width:60px;text-align:center">지급건수</th>
+            <th style="width:120px;text-align:right">지급 예상매출액(원)</th>
+            <th style="width:60px;text-align:center">입금건수</th>
+            <th style="width:120px;text-align:right">실 입금액(원)</th>
+            <th style="width:100px;text-align:right">차액(원)</th>
+            <th style="width:90px">최근 입금일</th>
+            <th style="width:76px;text-align:center">상태</th>
+          </tr></thead>
+          <tbody>
+            ${matchRowsFiltered.length ? matchRowsFiltered.map(g => `
+              <tr style="background:${matchStatusBg[g.status]}">
+                <td style="font-weight:600">${g.patient||'<span style=\"color:var(--tm)\">(미확인)</span>'}</td>
+                <td>${g.caregiver||'-'}</td>
+                <td style="text-align:center">${g.payCount}</td>
+                <td class="nm" style="color:var(--P);font-weight:600">${fmt(g.expectedTotal)}</td>
+                <td style="text-align:center">${g.recvCount}</td>
+                <td class="nm inc">${fmt(g.receivedTotal)}</td>
+                <td class="nm" style="color:${g.diff>0?'var(--R)':'var(--G)'};font-weight:700">${fmt(g.diff)}</td>
+                <td class="dn">${g.lastRecvDate||'-'}</td>
+                <td style="text-align:center"><span style="font-weight:700;color:${matchStatusColor[g.status]}">${g.status}</span></td>
+              </tr>`).join('') : `<tr><td colspan="9" style="text-align:center;color:var(--tm);padding:20px">${matchHasFilter ? '해당 기간에 대조할 건이 없습니다' : '급여 지급건이 없습니다'}</td></tr>`}
+          </tbody>
+        </table></div>
+        ${matchUnmatchedFiltered.length ? `
+        <div style="padding:10px 14px;font-size:12px;color:var(--O);background:#FFF7ED;border-top:1px solid var(--bd)">
+          ⚠ 제목에서 환자명을 인식하지 못한 지급건 ${matchUnmatchedFiltered.length}건이 있습니다. 제목을 <b>간병비 입금(환자: 이름)</b> 형식으로 입력하면 자동으로 대조됩니다.
+          <br>${matchUnmatchedFiltered.map(t=>`「${t.title}」`).join(', ')}
+        </div>` : ''}
+        <div style="padding:8px 14px;font-size:11.5px;color:var(--t3);border-top:1px solid var(--bd)">
+          매칭 방식: 지출결의서 제목의 <b>환자명</b>과 수취인(<b>간병인명</b>)을, 입출금 내역 매출액 계정의 내용(예: 타행IB 환자명-간병인명)에서 추출한 이름과 대조합니다. 검색 필터는 표시 대상만 좁힐 뿐, 지급·입금 합계는 항상 전체 기간 기준으로 정확히 매칭됩니다.
+        </div>
       </div>
     </div>
 
