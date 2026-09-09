@@ -349,6 +349,7 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
         <div class="sb-i" data-page="fs-report" onclick="nav(this)"><span class="si">📑</span><span class="sn">손익계산서</span></div>
         <div class="sb-i" data-page="bs-report" onclick="nav(this)"><span class="si">⚖️</span><span class="sn">재무상태표</span></div>
         <div class="sb-i" data-page="tb-report" onclick="nav(this)"><span class="si">📋</span><span class="sn">합계잔액시산표</span></div>
+        <div class="sb-i" data-page="fs-guide" onclick="nav(this)"><span class="si">💡</span><span class="sn">이익 vs 현금 안내</span></div>
       </div>
     </div>
     <div class="sb-grp">
@@ -759,6 +760,63 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
   <div id="tb-report-body"></div>
 </div>
 
+<!-- 재무제표 이익 vs 현금 이익 안내 -->
+<div id="p-fs-guide" class="page">
+  <div class="ph">
+    <div><div class="ph-t">재무제표 이익 vs 실제 현금 이익</div><div class="ph-s">왜 손익계산서 순이익과 통장 잔액 증감이 다른가요?</div></div>
+  </div>
+
+  <div class="card" style="margin-bottom:14px;padding:16px 18px;line-height:1.7;font-size:13px;color:var(--t2)">
+    "이번 달에 이익이 났다는데 왜 통장엔 돈이 안 늘었지?" — 이 페이지는 그 이유를 4가지로 설명합니다. 손익계산서(회계상 이익)와 실제 통장 잔액(현금)은 애초에 계산 방식 자체가 다르기 때문에, 두 숫자가 다른 것은 정상입니다.
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin-bottom:16px">
+
+    <div class="card" style="padding:16px 18px">
+      <div style="font-size:13px;font-weight:700;color:#1d4ed8;margin-bottom:6px">① 발생주의 vs 현금주의</div>
+      <div style="font-size:12.5px;color:var(--t2);line-height:1.7">
+        매출은 <b>일이 끝난 시점</b>에 장부에 기록되지만, 돈은 <b>나중에</b> 들어옵니다.<br>
+        예: 이번 조회 기간 기준 급여 지출건의 예상매출액 중 아직 입금 안 된 <b>외상매출금</b>이 <b id="fsg-ar-wage">-</b>, 세금계산서상 매출인데 아직 완료 처리 안 된 <b>미수수익</b>이 <b id="fsg-ar-tax">-</b> 있습니다. 이 금액만큼 "장부상 매출"과 "실제 입금액"이 벌어집니다.
+      </div>
+    </div>
+
+    <div class="card" style="padding:16px 18px">
+      <div style="font-size:13px;font-weight:700;color:#7c3aed;margin-bottom:6px">② 현금 유출 없는 비용</div>
+      <div style="font-size:12.5px;color:var(--t2);line-height:1.7">
+        감가상각비처럼 <b>실제 현금은 안 나가지만 장부상 비용으로 잡히는 항목</b>이 있습니다. 사무 비품·차량을 구입하면 현금은 구입 시점에 한 번에 나가지만, 회계상 비용은 이후 몇 년에 걸쳐 나눠서 인식되기 때문입니다.<br>
+        현재 이 시스템은 고정자산·감가상각을 별도 계정으로 관리하고 있지 않지만, 향후 도입할 경우 이익은 줄어도 통장 잔액은 그대로인 상황이 생길 수 있습니다.
+      </div>
+    </div>
+
+    <div class="card" style="padding:16px 18px">
+      <div style="font-size:13px;font-weight:700;color:#c2410c;margin-bottom:6px">③ 장부 외 현금 유출</div>
+      <div style="font-size:12.5px;color:var(--t2);line-height:1.7">
+        반대로 <b>현금은 나가지만 비용으로 잡히지 않는 항목</b>도 있습니다. 대출 원금 상환이 대표적입니다 — 이자만 비용(이자비용)이고, 원금 상환은 부채(단기차입금)가 줄어드는 것이라 손익계산서에는 나타나지 않습니다.<br>
+        현재 단기차입금 잔액은 <b id="fsg-short-loan">-</b>입니다. 이 금액을 상환하면 통장 잔액은 줄어들지만, 손익계산서상 비용은 발생하지 않습니다.
+      </div>
+    </div>
+
+    <div class="card" style="padding:16px 18px">
+      <div style="font-size:13px;font-weight:700;color:#15803d;margin-bottom:6px">④ 운전자본의 영향</div>
+      <div style="font-size:12.5px;color:var(--t2);line-height:1.7">
+        지출을 먼저 하고 나중에 정산하거나(선급금), 비용은 이미 발생했지만 아직 지급하지 않은 돈(미지급금)이 있으면 현금 흐름과 손익이 시차를 두고 움직입니다.<br>
+        현재 선급금(승인 대기 지출결의서) <b id="fsg-prepaid">-</b>, 미지급금(대기 상태 지출결의서) <b id="fsg-unpaid">-</b>이 이런 "현금 잠김·유예" 효과를 만들고 있습니다.
+      </div>
+    </div>
+
+  </div>
+
+  <div class="card" style="padding:16px 18px">
+    <div class="ch" style="margin-bottom:10px"><span class="ct">📊 이번 조회 기간 비교 (손익계산서 페이지에서 선택한 기간 기준)</span></div>
+    <div class="fs-summary-grid">
+      <div class="sc"><div class="sc-l">손익계산서 당기순이익</div><div class="sc-v" id="fsg-net-income">-</div></div>
+      <div class="sc"><div class="sc-l">현재 통장 잔액</div><div class="sc-v" id="fsg-cash">-</div></div>
+    </div>
+    <div style="margin-top:10px;font-size:11.5px;color:var(--t3);line-height:1.7">
+      ※ 당기순이익과 통장 잔액은 애초에 "같아야 하는 숫자"가 아닙니다. 당기순이익은 이번 기간 동안 <b>장부에 새로 반영된</b> 손익이고, 통장 잔액은 창립 이후 지금까지의 <b>누적 현금 흐름</b>입니다. 위 ①~④의 차이만큼 두 숫자 사이에 간격이 있는 것이 정상입니다.
+    </div>
+  </div>
+</div>
 
 <!-- 재무제표 드릴다운 상세 모달 -->
 <div class="mo" id="mo-fs-drill">
@@ -828,9 +886,9 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
   <div class="card" style="margin-top:12px"><div class="ch"><span class="ct">📊 재무상태표 설정</span></div>
     <div style="padding:14px 16px">
       <div class="fgrid">
-        <div class="fg"><label class="fl">전기이월 이익잉여금(원)</label>
+        <div class="fg"><label class="fl">전기이월 미처분이익잉여금(원)</label>
           <input type="number" class="fc" id="sys-carry-over" placeholder="0" value="0">
-          <div class="fh">전기(이전 회계연도) 이월 이익잉여금. 재무상태표 자본에 반영됩니다.</div>
+          <div class="fh">전기(이전 회계연도) 이월 미처분이익잉여금. 재무상태표 자본에 반영됩니다.</div>
         </div>
       </div>
       <button class="btn p" onclick="saveSysInfo()">✓ 저장</button>
@@ -1466,6 +1524,7 @@ function nav(el) {
   if(pid==='fs-report')   { renderFS('fs'); }
   if(pid==='bs-report')   { renderFS('bs'); }
   if(pid==='tb-report')   { renderFS('tb'); }
+  if(pid==='fs-guide')    { renderFsGuide(); }
   if(pid==='exp-req')     renderExp();
   if(pid==='exp-today')   renderExpToday();
   if(pid==='sum-year')     renderYear();
@@ -4313,11 +4372,13 @@ function makeFsFilter(prefix) {
     const v = String(i+1).padStart(2,'0');
     return `<option value="${v}"${v===mo2?' selected':''}>${i+1}월</option>`;
   }).join('');
+  const todayISO = new Date().toISOString().slice(0,10);
 
   return `<div class="fs-filter no-print">
     <div class="fs-tab-group">
       <button class="fs-tab active" id="${prefix}-tab-month" onclick="setFsTab('month','${prefix}')">월별</button>
       <button class="fs-tab" id="${prefix}-tab-year"  onclick="setFsTab('year','${prefix}')">연도별</button>
+      <button class="fs-tab" id="${prefix}-tab-day"   onclick="setFsTab('day','${prefix}')">일별</button>
     </div>
     <select class="fs" id="${prefix}-year" onchange="renderFS('${prefix}')" style="width:82px">
       <option>2026</option><option>2025</option><option>2024</option>
@@ -4326,6 +4387,11 @@ function makeFsFilter(prefix) {
       <select class="fs" id="${prefix}-from" onchange="renderFS('${prefix}')" style="width:72px">${moOpts}</select>
       <span style="font-size:12px;color:var(--t3)">~</span>
       <select class="fs" id="${prefix}-to"   onchange="renderFS('${prefix}')" style="width:72px">${moOpts}</select>
+    </div>
+    <div id="${prefix}-dwrap" style="display:none;gap:6px;align-items:center">
+      <input type="date" class="fs" id="${prefix}-day-from" value="${todayISO}" onchange="renderFS('${prefix}')" style="width:136px">
+      <span style="font-size:12px;color:var(--t3)">~</span>
+      <input type="date" class="fs" id="${prefix}-day-to"   value="${todayISO}" onchange="renderFS('${prefix}')" style="width:136px">
     </div>
     <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--t3);margin-left:auto">
       매출원가 마진율
@@ -4339,12 +4405,16 @@ function makeFsFilter(prefix) {
 
 function setFsTab(tab, prefix) {
   fsTab = tab;
-  ['month','year'].forEach(t => {
+  ['month','year','day'].forEach(t => {
     const b = document.getElementById(`${prefix}-tab-${t}`);
     if(b){ b.classList.toggle('active', t===tab); }
   });
   const mw = document.getElementById(`${prefix}-mwrap`);
-  if(mw) mw.style.display = tab==='month' ? '' : 'none';
+  const dw = document.getElementById(`${prefix}-dwrap`);
+  const yrEl = document.getElementById(`${prefix}-year`);
+  if(mw)   mw.style.display   = tab==='month' ? '' : 'none';
+  if(dw)   dw.style.display   = tab==='day'   ? 'flex' : 'none';
+  if(yrEl) yrEl.style.display = tab==='day'   ? 'none' : '';
   renderFS(prefix);
 }
 
@@ -4679,16 +4749,28 @@ function fsHeader(title, sub, period) {
 /* ── 공통 데이터 계산 ── */
 function calcFSData(prefix) {
   const yr  = document.getElementById(`${prefix}-year`)?.value || '2026';
-  const mo1 = fsTab==='month' ? (document.getElementById(`${prefix}-from`)?.value||'01') : '01';
-  const mo2 = fsTab==='month' ? (document.getElementById(`${prefix}-to`)?.value||'12')   : '12';
 
-  const start = `${yr}-${mo1}-01`;
-  // 실제 월말 계산 (28/29/30/31일 정확히)
-  const endDay = new Date(parseInt(yr), parseInt(mo2), 0).getDate();
-  const end   = `${yr}-${mo2}-${String(endDay).padStart(2,'0')}`;
-  const label = fsTab==='month'
-    ? (mo1===mo2 ? `${yr}년 ${parseInt(mo1)}월` : `${yr}년 ${parseInt(mo1)}~${parseInt(mo2)}월`)
-    : `${yr}년 (연간)`;
+  let start, end, label, mo1 = '', mo2 = '';
+  if(fsTab === 'day') {
+    // 일별: 시작일~종료일을 직접 지정 (연/월/일을 각각 자유롭게 설정)
+    const todayISO = new Date().toISOString().slice(0,10);
+    let dFrom = document.getElementById(`${prefix}-day-from`)?.value || todayISO;
+    let dTo   = document.getElementById(`${prefix}-day-to`)?.value   || todayISO;
+    if(dFrom > dTo) { const t = dFrom; dFrom = dTo; dTo = t; } // 역순 입력 방지
+    start = dFrom;
+    end   = dTo;
+    label = start === end ? `${start} (일별)` : `${start} ~ ${end}`;
+  } else {
+    mo1 = fsTab==='month' ? (document.getElementById(`${prefix}-from`)?.value||'01') : '01';
+    mo2 = fsTab==='month' ? (document.getElementById(`${prefix}-to`)?.value||'12')   : '12';
+    start = `${yr}-${mo1}-01`;
+    // 실제 월말 계산 (28/29/30/31일 정확히)
+    const endDay = new Date(parseInt(yr), parseInt(mo2), 0).getDate();
+    end   = `${yr}-${mo2}-${String(endDay).padStart(2,'0')}`;
+    label = fsTab==='month'
+      ? (mo1===mo2 ? `${yr}년 ${parseInt(mo1)}월` : `${yr}년 ${parseInt(mo1)}~${parseInt(mo2)}월`)
+      : `${yr}년 (연간)`;
+  }
 
   /* ══════════════════════════════════════
      단일 소스: 입출금 내역(ledger)만 사용
@@ -4703,6 +4785,7 @@ function calcFSData(prefix) {
   const CAPITAL_ACCTS      = ['보통주자본금'];
   const OTHER_INCOME_ACCTS = ['기타수입','이자수익'];
   const SALE_ACCTS         = ['매출액'];  // 실 입금된 매출만
+  const NONOP_EXPENSE_ACCTS = ['이자비용'];  // 영업외비용으로 별도 집계 — 판관비(SGA)에서 반드시 제외
 
   // 매출액: 계정과목이 '매출액'인 실 입금 내역만
   const ledSale = ledPeriod.filter(t =>
@@ -4727,7 +4810,7 @@ function calcFSData(prefix) {
                      '임차료','통신비','차량유지비','외주비','세금과공과','지급수수료'];
   const sgaMap = {};
   ledPeriod
-    .filter(t => t.type === 'expense')
+    .filter(t => t.type === 'expense' && !NONOP_EXPENSE_ACCTS.includes(t.acct))
     .forEach(t => {
       const k = SGA_ACCTS.includes(t.acct) ? t.acct : '기타';
       sgaMap[k] = (sgaMap[k]||0) + Number(t.amount||0);
@@ -4808,7 +4891,7 @@ function calcFSData(prefix) {
     .filter(t => t.ditype==='매입' && t.date <= end)
     .reduce((s,t) => s+Number(t.supply||0), 0);
   const cumSGA = allToEnd
-    .filter(t => t.type==='expense')
+    .filter(t => t.type==='expense' && !NONOP_EXPENSE_ACCTS.includes(t.acct))
     .reduce((s,t) => s+Number(t.amount||0), 0);
   const cumOtherInc = allToEnd
     .filter(t => t.type==='income' && OTHER_INCOME_ACCTS.includes(t.acct))
@@ -4817,7 +4900,7 @@ function calcFSData(prefix) {
     .filter(t => t.type==='expense' && t.acct==='이자비용')
     .reduce((s,t) => s+Number(t.amount||0), 0);
   const bsRetained = cumRev - cumCogs - cumSGA + cumOtherInc - cumIntExp;
-  const bsRetainedLabel = '이익잉여금';
+  const bsRetainedLabel = '미처분이익잉여금';
 
   // 전기이월 이익잉여금 (시스템 설정)
   let bsCarryOver = 0;
@@ -4983,7 +5066,7 @@ function renderBS(d, forPrint=false) {
 
   /* ── 자본 항목 ────────────────────────────────────────
      ① 자본금
-     ② 이익잉여금 = 전기이월 + 당기순이익(손익계산서 연동)
+     ② 미처분이익잉여금 = 전기이월 + 당기순이익(손익계산서 연동)
   ─────────────────────────────────────────────────────── */
   // 당기순이익은 손익계산서와 직접 연동
   const currentNetIncome = d.netIncome;  // 손익계산서 당기순이익
@@ -5051,9 +5134,9 @@ function renderBS(d, forPrint=false) {
                 <td>${D('ledger_income:보통주자본금','자본금', d.bsCapital)}</td>
               </tr>
 
-              <tr><td colspan="3" style="background:#f0fdf4;font-size:10.5px;font-weight:700;color:#15803d;padding:4px 10px;letter-spacing:.3px">Ⅱ. 이익잉여금</td></tr>
+              <tr><td colspan="3" style="background:#f0fdf4;font-size:10.5px;font-weight:700;color:#15803d;padding:4px 10px;letter-spacing:.3px">Ⅱ. 미처분이익잉여금</td></tr>
               <tr class="fs-item">
-                <td style="padding-left:18px">전기이월 이익잉여금</td>
+                <td style="padding-left:18px">전기이월 미처분이익잉여금</td>
                 <td style="font-size:10.5px;color:#9ca3af">당기 이전 누적 손익</td>
                 <td>${fmtFS(priorRetainedAdj)}</td>
               </tr>
@@ -5122,7 +5205,7 @@ function renderBS(d, forPrint=false) {
       <div style="padding:10px 14px;background:#fef3c7;border-top:1px solid #fde68a;font-size:11.5px;color:#92400e;line-height:1.8">
         <strong>📋 대차 불일치 원인 체크리스트:</strong><br>
         ${d.bsArWage === 0 ? '⚠️ <strong>외상매출금 = 0원</strong> — 지출결의서에 예상매출액이 입력되지 않았습니다. 지출결의서 → 급여 계정 → 예상매출액 입력 필요<br>' : ''}
-        ${d.bsRetained > 0 && totalAssets > liabEquity ? '⚠️ <strong>이익잉여금 과소</strong> — 누적 당기순이익이 현금잔액 증가분보다 작습니다. 자본금 이외 입금 항목 확인 필요<br>' : ''}
+        ${d.bsRetained > 0 && totalAssets > liabEquity ? '⚠️ <strong>미처분이익잉여금 과소</strong> — 누적 당기순이익이 현금잔액 증가분보다 작습니다. 자본금 이외 입금 항목 확인 필요<br>' : ''}
         ${d.bsRetained < 0 && totalAssets < liabEquity ? '⚠️ <strong>자산 과소</strong> — 미수수익(세금계산서 미완료 매출)이 반영되지 않았거나 외상매출금이 누락되었습니다.<br>' : ''}
         <strong>차액 ${fmtFSRaw(Math.abs(diff))}원</strong> = 가능 원인: ①외상매출금 미입력 ②미수수익 미반영 ③계정 오분류<br>
         → 지출결의서 탭 &gt; 💰 외상매출금 현황에서 예상매출액 확인
@@ -5134,218 +5217,139 @@ function renderBS(d, forPrint=false) {
 function renderTB(d, forPrint=false) {
   /*
   ══════════════════════════════════════════════
-  가상 복식분개 보정 로직 (Virtual Double-Entry)
+  합계잔액시산표 (마감 전 시산표)
   ══════════════════════════════════════════════
-  현재 데이터는 단식부기(한쪽만 입력)이므로
-  상대 계정을 프로그램 레벨에서 자동 생성하여
-  차대 균형을 맞춤.
-
-  규칙:
-  ┌─────────────────────────────────────────────┐
-  │ 거래 유형      │ 차변(Debit)   │ 대변(Credit) │
-  ├─────────────────────────────────────────────┤
-  │ 매출 발생      │ 현금·예금 *  │ 매출액       │
-  │ 매입/비용 발생  │ 비용계정     │ 현금·예금 *  │
-  │ 자본 출자      │ 현금·예금 *  │ 자본금       │
-  │ 영업외수익     │ 현금·예금 *  │ 영업외수익   │
-  │ 영업외비용     │ 영업외비용   │ 현금·예금 *  │
-  └─────────────────────────────────────────────┘
-  * = 자동 보정된 상대 계정 (가상 생성)
+  재무상태표(BS)·손익계산서(IS)에서 이미 확정한 값(d.bsCash, d.bsArWage,
+  d.totalRev, d.sgaMap 등)을 그대로 계정과목별 정상잔액 위치(차변/대변)에
+  배치한다. 별도의 가상 상대계정이나 보정(plug) 계정을 만들지 않으므로
+  IS·BS와 항상 1원 단위까지 동일한 숫자로 표시된다.
+  수익·비용 계정은 아직 마감(결산 대체분개) 전이므로 열린 상태로 표시하며,
+  "수익 합계 − 비용 합계 = 당기순이익"이 자동으로 성립해
+  재무상태표의 미처분이익잉여금과 정확히 연동된다.
   */
 
-  const accounts = {};
-  let correctedCount = 0;  // 보정된 단식 전표 건수
-  let correctedAmt   = 0;  // 보정된 총 금액
+  const priorRetained = d.bsRetained - d.netIncome; // 전기이월 미처분이익잉여금
 
-  const add = (acct, debit, credit) => {
-    if(!accounts[acct]) accounts[acct] = {debit:0, credit:0, corrected:false};
-    accounts[acct].debit  += Math.round(debit);
-    accounts[acct].credit += Math.round(credit);
-  };
-  const addCorrected = (acct, debit, credit, amt) => {
-    if(!accounts[acct]) accounts[acct] = {debit:0, credit:0, corrected:false};
-    accounts[acct].debit  += Math.round(debit);
-    accounts[acct].credit += Math.round(credit);
-    accounts[acct].corrected = true;
-    correctedAmt += Math.round(amt);
-  };
+  const rows = [
+    // ── 자산 (차변) ──
+    { grp:'자산', acct:'현금·예금',   side:'debit', amt:d.bsCash,     key:'ledger:ALL',                note:'입출금 내역 기간 말 잔액' },
+    { grp:'자산', acct:'외상매출금',  side:'debit', amt:d.bsArWage,   key:'expReq:wage',               note:'급여 예상매출액 − 실입금액' },
+    { grp:'자산', acct:'미수수익',    side:'debit', amt:d.bsArTax,    key:'taxSale:ALL',               note:'세금계산서 미완료 매출' },
+    { grp:'자산', acct:'선급금',      side:'debit', amt:d.bsPrepaid,  key:'expReq:ALL',                note:'승인 대기 지출결의서' },
+    // ── 부채 (대변) ──
+    { grp:'부채', acct:'미지급금',    side:'credit', amt:d.bsUnpaid,    key:'expReq:unpaid',           note:'대기 상태 지출결의서' },
+    { grp:'부채', acct:'외상매입금',  side:'credit', amt:d.bsApTax,     key:'taxBuy:ALL',              note:'세금계산서 미완료 매입' },
+    { grp:'부채', acct:'단기차입금',  side:'credit', amt:d.bsShortLoan, key:'ledger_income:단기차입금', note:"계정과목 '단기차입금' 입금 합계" },
+    // ── 자본 (대변) ──
+    { grp:'자본', acct:'자본금',                    side:'credit', amt:d.bsCapital,   key:'ledger_income:보통주자본금', note:'보통주자본금 누계' },
+    { grp:'자본', acct:'전기이월 미처분이익잉여금',  side:'credit', amt:priorRetained, key:'',                           note:'당기 이전 누적 손익' },
+    { grp:'자본', acct:'전기이월(수동입력)',        side:'credit', amt:d.bsCarryOver, key:'',                           note:'시스템 설정값' },
+    // ── 수익 (대변, 당기 발생분 — 마감 전) ──
+    { grp:'수익', acct:'매출액',      side:'credit', amt:d.totalRev, key:'ledger_income:ALL',        note:d.label+' 매출 입금' },
+    { grp:'수익', acct:'영업외수익',  side:'credit', amt:d.otherInc, key:'ledger_income:기타수입',   note:'이자수익·기타수입' },
+    // ── 비용 (차변, 당기 발생분 — 마감 전) ──
+    { grp:'비용', acct:'매출원가',    side:'debit', amt:d.cogs,        key:'taxBuy:매입원가',     note:d.cogsNote },
+    ...Object.entries(d.sgaMap).map(([k,v]) => ({ grp:'비용', acct:k, side:'debit', amt:v, key:`ledger_exp:${k}`, note:'판관비' })),
+    { grp:'비용', acct:'이자비용',    side:'debit', amt:d.interestExp, key:'ledger_exp:이자비용', note:'영업외비용' },
+  ].filter(r => Math.round(Number(r.amt)||0) !== 0);
 
-  const CASH = '현금·예금';  // 자동 보정 상대 계정
-
-  // ── 1. 매출 (원본: 대변 수익, 보정: 차변 현금·예금) ──
-  d.taxSale.forEach(t => {
-    const amt = Number(t.supply||0);
-    const acct = t.acct||'매출액';
-    add(acct, 0, amt);                    // 원본: 매출액 대변
-    addCorrected(CASH, amt, 0, amt);       // 보정: 현금·예금 차변
-    correctedCount++;
-  });
-  d.ledIncome.filter(t=>t.acct!=='보통주자본금').forEach(t => {
-    const amt = Number(t.amount||0);
-    const acct = t.acct||'매출액';
-    add(acct, 0, amt);
-    addCorrected(CASH, amt, 0, amt);
-    correctedCount++;
-  });
-
-  // ── 2. 매입/매출원가 (원본: 차변 비용, 보정: 대변 현금·예금) ──
-  d.taxBuy.forEach(t => {
-    const amt = Number(t.supply||0);
-    add(t.acct||'매입원가', amt, 0);
-    addCorrected(CASH, 0, amt, amt);
-    correctedCount++;
-  });
-  if(!d.taxBuyAmt && d.cogs) {
-    add('매출원가(추정)', d.cogs, 0);
-    addCorrected(CASH, 0, d.cogs, d.cogs);
-    correctedCount++;
-  }
-
-  // ── 3. 판관비 (원본: 차변 비용, 보정: 대변 현금·예금) ──
-  Object.entries(d.sgaMap).forEach(([k,v]) => {
-    add(k, v, 0);
-    addCorrected(CASH, 0, v, v);
-    correctedCount++;
-  });
-
-  // ── 4. 영업외수익 (원본: 대변, 보정: 차변 현금·예금) ──
-  if(d.otherInc) {
-    add('영업외수익', 0, d.otherInc);
-    addCorrected(CASH, d.otherInc, 0, d.otherInc);
-    correctedCount++;
-  }
-
-  // ── 5. 영업외비용 (원본: 차변, 보정: 대변 현금·예금) ──
-  if(d.interestExp) {
-    add('이자비용', d.interestExp, 0);
-    addCorrected(CASH, 0, d.interestExp, d.interestExp);
-    correctedCount++;
-  }
-
-  // ── 6. 출자금 (원본: 대변 자본, 보정: 차변 현금·예금) ──
-  if(d.paidIn) {
-    add('보통주자본금', 0, d.paidIn);
-    addCorrected(CASH, d.paidIn, 0, d.paidIn);
-    correctedCount++;
-  }
-
-  // ── 7. 매출채권·매입채무 (이미 양방향 존재) ──
-  if(d.arAmt) {
-    add('매출채권', d.arAmt, 0);
-    add('매출액(미수)', 0, d.arAmt);  // 상대: 아직 못받은 매출
-  }
-  if(d.apAmt) {
-    add('매입원가(미지급)', d.apAmt, 0);
-    add('매입채무', 0, d.apAmt);
-  }
-  if(d.prepaid) {
-    add('선급금', d.prepaid, 0);
-    add('현금·예금(선급)', 0, d.prepaid);
-  }
-
-  // ── 집계 ──
-  const totalDebit  = Object.values(accounts).reduce((s,v)=>s+v.debit, 0);
-  const totalCredit = Object.values(accounts).reduce((s,v)=>s+v.credit, 0);
+  const totalDebit  = rows.filter(r=>r.side==='debit' ).reduce((s,r)=>s+Number(r.amt||0), 0);
+  const totalCredit = rows.filter(r=>r.side==='credit').reduce((s,r)=>s+Number(r.amt||0), 0);
   const diff        = Math.round(totalDebit) - Math.round(totalCredit);
-  const tbBalance   = diff === 0;
+  const balanced    = diff === 0;
 
-  // 잔여 불일치가 있으면 '보정 잔액' 계정으로 흡수
-  let residualNote = '';
-  if(!tbBalance) {
-    const residual = Math.abs(diff);
-    if(diff > 0) {
-      // 차변 초과 → 대변에 '기초자본(보정)' 추가
-      addCorrected('기초자본(보정)', 0, residual, residual);
-      residualNote = `잔여 차액 ${residual.toLocaleString()}원을 '기초자본(보정)' 대변으로 흡수`;
-    } else {
-      // 대변 초과 → 차변에 '기초자산(보정)' 추가
-      addCorrected('기초자산(보정)', residual, 0, residual);
-      residualNote = `잔여 차액 ${residual.toLocaleString()}원을 '기초자산(보정)' 차변으로 흡수`;
-    }
-    correctedCount++;
-  }
+  const groupOrder = ['자산','부채','자본','수익','비용'];
+  const groupLabel = {자산:'Ⅰ. 자산',부채:'Ⅱ. 부채',자본:'Ⅲ. 자본',수익:'Ⅳ. 수익 (당기 발생분)',비용:'Ⅴ. 비용 (당기 발생분)'};
+  const groupColor = {자산:'#1d4ed8',부채:'#c2410c',자본:'#15803d',수익:'#7c3aed',비용:'#dc2626'};
 
-  const finalDebit  = Object.values(accounts).reduce((s,v)=>s+v.debit, 0);
-  const finalCredit = Object.values(accounts).reduce((s,v)=>s+v.credit, 0);
-  const finalBalance = Math.round(finalDebit) === Math.round(finalCredit);
-
-  const rows = Object.entries(accounts)
-    .filter(([,v]) => v.debit || v.credit)
-    .sort((a,b) => (b[1].debit+b[1].credit) - (a[1].debit+a[1].credit));
+  let rowNo = 0;
+  const bodyHtml = groupOrder.map(g => {
+    const items = rows.filter(r=>r.grp===g);
+    if(!items.length) return '';
+    return `<tr><td colspan="7" style="background:#f8fafc;font-size:10.5px;font-weight:700;color:${groupColor[g]};padding:4px 10px;letter-spacing:.3px">${groupLabel[g]}</td></tr>` +
+      items.map(r => {
+        rowNo++;
+        const debitAmt  = r.side==='debit'  ? r.amt : 0;
+        const creditAmt = r.side==='credit' ? r.amt : 0;
+        const D = (val) => forPrint ? fmtFS(val) : (r.key ? fmtFS(val, r.key, r.acct) : fmtFS(val));
+        return `<tr class="fs-item">
+          <td style="text-align:center;color:#9ca3af;font-size:11px">${rowNo}</td>
+          <td>${r.acct}</td>
+          <td style="font-size:10.5px;color:#9ca3af">${r.note||''}</td>
+          <td>${D(debitAmt)}</td>
+          <td>${D(debitAmt)}</td>
+          <td>${D(creditAmt)}</td>
+          <td>${D(creditAmt)}</td>
+        </tr>`;
+      }).join('');
+  }).join('');
 
   return `<div class="fs-wrap${forPrint?' fs-page-break':''}">
-    ${fsHeader('합계잔액시산표','Trial Balance · 가상 복식분개 보정 적용', d.label)}
+    ${fsHeader('합계잔액시산표','Trial Balance · 재무상태표·손익계산서와 동일 수치 기준', d.label)}
 
     <div class="fs-section">
       <table class="fs-tbl">
         <thead><tr>
           <th style="width:36px;text-align:center">No.</th>
           <th>계정과목</th>
-          <th style="width:8px;text-align:center"></th>
+          <th>산출 근거</th>
           <th style="width:120px">차변 합계</th>
           <th style="width:120px">차변 잔액</th>
           <th style="width:120px">대변 합계</th>
           <th style="width:120px">대변 잔액</th>
         </tr></thead>
-        <tbody>
-          ${rows.map(([acct,v],i) => {
-            const netDebit  = v.debit  > v.credit ? v.debit  - v.credit : 0;
-            const netCredit = v.credit > v.debit  ? v.credit - v.debit  : 0;
-            const isCash    = acct === CASH;
-            const isFix     = v.corrected;
-            // 드릴다운 키: 계정과목명으로 소스 추정
-            const drillKey  = forPrint ? '' : (
-              isCash        ? 'ledger:ALL' :
-              acct==='매출액'||acct==='매출액(미수)' ? 'taxSale:ALL' :
-              acct==='매입원가'||acct==='매입원가(미지급)' ? 'taxBuy:ALL' :
-              acct==='보통주자본금' ? 'ledger_income:보통주자본금' :
-              `ledger_exp:${acct}`
-            );
-            const D = (val) => forPrint ? fmtFS(val) : fmtFS(val, drillKey, acct);
-            return `<tr class="fs-item" style="${isCash?'background:#f0fdf4':''}${isFix&&!isCash?'color:#6b7280':''}">
-              <td style="text-align:center;color:#9ca3af;font-size:11px">${i+1}</td>
-              <td style="font-weight:${isCash?'600':'400'}">${acct}${isFix&&!isCash?' <span style="font-size:10px;color:#9ca3af">[원본]</span>':''}</td>
-              <td style="text-align:center;font-size:10px;color:#d1d5db">${isFix?'↔':''}</td>
-              <td>${D(v.debit)}</td>
-              <td>${D(netDebit)}</td>
-              <td>${D(v.credit)}</td>
-              <td>${D(netCredit)}</td>
-            </tr>`;
-          }).join('')}
-        </tbody>
+        <tbody>${bodyHtml}</tbody>
         <tfoot>
-          <tr class="${finalBalance?'fs-balance-ok':'fs-balance-err'}">
+          <tr class="${balanced?'fs-balance-ok':'fs-balance-err'}">
             <td colspan="3" style="text-align:center;font-weight:700">
-              ${finalBalance?'✅ 차대 균형 (보정 완료)':'❌ 차대 불일치'}
+              ${balanced?'✅ 차대 균형 확인':'❌ 차대 불일치 — 하단 원인 확인'}
             </td>
-            <td>${fmtFS(finalDebit)}</td>
-            <td>-</td>
-            <td>${fmtFS(finalCredit)}</td>
-            <td>-</td>
+            <td>${fmtFS(totalDebit)}</td>
+            <td>${fmtFS(totalDebit)}</td>
+            <td>${fmtFS(totalCredit)}</td>
+            <td>${fmtFS(totalCredit)}</td>
           </tr>
         </tfoot>
       </table>
     </div>
 
-    <!-- 보정 완료 안내 -->
-    <div style="margin-top:12px;padding:10px 14px;border-radius:6px;font-size:12px;
-      background:${finalBalance?'#f0fdf4':'#fef9c3'};
-      border:1px solid ${finalBalance?'#86efac':'#fde047'};
-      color:${finalBalance?'#166534':'#854d0e'}">
-      <strong>[보정 완료]</strong>
-      과거 단식 전표 <strong>${correctedCount}건</strong>
-      (총 <strong>${correctedAmt.toLocaleString()}원</strong>)에 대해
-      상대 계정(${CASH})이 자동 매핑되어 차대 균형이 정상화되었습니다.
-      ${residualNote ? `<br><span style="font-size:11px;color:#92400e">※ ${residualNote}</span>` : ''}
+    <div style="margin-top:8px;padding:8px 12px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;font-size:11px;color:#6b7280;line-height:1.8">
+      <strong>ℹ️ 안내:</strong> 이 시산표는 재무상태표·손익계산서에 사용된 숫자를 그대로 계정별로 배치한 것이라 별도의 보정 계정 없이 항상 두 재무제표와 1원 단위까지 일치합니다.
+      계정별로 상쇄되는 반대 방향 거래를 개별 관리하지 않으므로 <b>차변 합계 = 차변 잔액, 대변 합계 = 대변 잔액</b>으로 동일하게 표시됩니다.
+      수익·비용 계정은 아직 마감(결산 대체분개) 전이라 별도 항목으로 열려 있으며, <b>수익 합계 − 비용 합계 = 당기순이익</b>이 자동으로 성립합니다.
     </div>
 
-    <!-- 범례 -->
-    <div style="margin-top:8px;padding:8px 12px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;font-size:11px;color:#6b7280;line-height:1.8">
-      <strong>범례:</strong>
-      <span style="background:#f0fdf4;padding:1px 6px;border-radius:3px;margin:0 4px">현금·예금 (초록)</span> = 자동 보정된 상대 계정 |
-      <span style="color:#9ca3af">[원본]</span> = 입력된 단식 데이터 |
-      ↔ = 가상 복식 보정 적용<br>
-      차변 = 자산증가·비용발생 | 대변 = 부채·자본증가·수익발생
+    <div style="margin-top:12px;border:${balanced?'1.5px solid #86efac':'2px solid #fca5a5'};border-radius:8px;overflow:hidden">
+      <div style="padding:8px 14px;background:${balanced?'#15803d':'#dc2626'};color:#fff;font-weight:700;font-size:13px">
+        ${balanced ? '✅ 대차차액 0원 — 재무상태표·손익계산서와 완전히 일치' : '❌ 대차 불일치 — 재무상태표와 원인 동일'}
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+        <tr style="background:#f9fafb">
+          <td style="padding:7px 14px;width:50%;border-right:1px solid #e5e7eb">차변 합계 (자산+비용)</td>
+          <td style="padding:7px 14px;text-align:right;font-weight:700;font-family:'JetBrains Mono',monospace">${fmtFSRaw(totalDebit)} 원</td>
+        </tr>
+        <tr>
+          <td style="padding:7px 14px;border-right:1px solid #e5e7eb">대변 합계 (부채+자본+수익)</td>
+          <td style="padding:7px 14px;text-align:right;font-weight:700;font-family:'JetBrains Mono',monospace">${fmtFSRaw(totalCredit)} 원</td>
+        </tr>
+        <tr style="background:${balanced?'#f0fdf4':'#fef2f2'};border-top:2px solid ${balanced?'#86efac':'#fca5a5'}">
+          <td style="padding:8px 14px;font-weight:700;border-right:1px solid #e5e7eb">대차차액</td>
+          <td style="padding:8px 14px;text-align:right;font-weight:800;font-size:14px;color:${balanced?'#15803d':'#dc2626'};font-family:'JetBrains Mono',monospace">
+            ${diff === 0 ? '0' : (diff > 0 ? '+' : '') + diff.toLocaleString('ko-KR')} 원
+          </td>
+        </tr>
+      </table>
+      <div style="padding:7px 14px;background:#f9fafb;border-top:1px solid #e5e7eb;font-size:11px;color:#6b7280">
+        검증: 매출액(${fmtFSRaw(d.totalRev)}) + 영업외수익(${fmtFSRaw(d.otherInc)}) − 매출원가(${fmtFSRaw(d.cogs)}) − 판관비(${fmtFSRaw(d.totalSGA)}) − 이자비용(${fmtFSRaw(d.interestExp)}) = 당기순이익 ${fmtFSRaw(d.netIncome)} → 재무상태표 미처분이익잉여금과 동일
+      </div>
+      ${!balanced ? `
+      <div style="padding:10px 14px;background:#fef3c7;border-top:1px solid #fde68a;font-size:11.5px;color:#92400e;line-height:1.8">
+        <strong>📋 대차 불일치 원인 체크리스트</strong> (재무상태표와 동일한 원인입니다):<br>
+        ${d.bsArWage === 0 ? '⚠️ <strong>외상매출금 = 0원</strong> — 지출결의서 → 급여 계정 → 예상매출액 입력 필요<br>' : ''}
+        ${d.bsRetained > 0 && totalDebit < totalCredit ? '⚠️ <strong>미처분이익잉여금 과소</strong> — 자본금 이외 입금 항목 확인 필요<br>' : ''}
+        ${d.bsRetained < 0 && totalDebit > totalCredit ? '⚠️ <strong>자산 과소</strong> — 미수수익·외상매출금 반영 여부 확인<br>' : ''}
+        → 재무상태표 탭 하단의 상세 진단을 함께 확인하세요.
+      </div>` : ''}
     </div>
   </div>`;
 }
@@ -5373,6 +5377,20 @@ function renderFS(prefix) {
   if(prefix==='fs') body.innerHTML = (isTab==='current') ? renderCurrentProfit(d) : renderIS(d);
   else if(prefix==='bs') body.innerHTML = renderBS(d);
   else if(prefix==='tb') body.innerHTML = renderTB(d);
+}
+
+/* ── 재무제표 이익 vs 현금 이익 안내 페이지 ── */
+function renderFsGuide() {
+  // 손익계산서(fs) 탭에서 선택된 기간 필터를 그대로 사용
+  const d = calcFSData('fs');
+  const set = (id, html) => { const el = document.getElementById(id); if(el) el.innerHTML = html; };
+  set('fsg-ar-wage',    fmtFSRaw(d.bsArWage)   + '원');
+  set('fsg-ar-tax',     fmtFSRaw(d.bsArTax)    + '원');
+  set('fsg-short-loan', fmtFSRaw(d.bsShortLoan)+ '원');
+  set('fsg-prepaid',    fmtFSRaw(d.bsPrepaid)  + '원');
+  set('fsg-unpaid',     fmtFSRaw(d.bsUnpaid)   + '원');
+  set('fsg-net-income', d.netIncome<0 ? `(₩${fmt(Math.abs(d.netIncome))})` : `₩${fmt(d.netIncome)}`);
+  set('fsg-cash',       `₩${fmt(d.bsCash)}`);
 }
 
 /* ── 인쇄 ── */
