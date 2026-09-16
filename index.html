@@ -3877,7 +3877,7 @@ function calcNetIncomeForRange(start, end) {
   const interestExp = ledPeriod.filter(t => t.type==='expense' && t.acct==='이자비용')
     .reduce((s,t)=>s+Number(t.amount||0), 0);
   const nonOp = otherInc - interestExp;
-  return { start, end, sgaMap, grossProfit, nonOp, netIncome: opProfit + nonOp };
+  return { start, end, totalRev, sgaMap, grossProfit, nonOp, netIncome: opProfit + nonOp };
 }
 function checkMonthStartNotice() {
   const now = new Date();
