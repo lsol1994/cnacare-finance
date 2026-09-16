@@ -1280,20 +1280,13 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
   </div>
 </div>
 
-<!-- 월초 안내: 지난달 현재순이익 안내 (지난달 입출금내역이 모두 등록된 경우에만 노출) -->
+<!-- 월초 안내: 지난달 현재순이익 안내 (지난달 입출금내역이 모두 등록된 경우에만 노출) - 카톡 발송용 문자 형식 -->
 <div class="mo" id="mo-monthstart-profit">
-  <div class="mbox" style="max-width:420px"><div class="mhandle"></div>
-    <div class="mh"><div class="mt">💵 지난달 현재순이익 안내</div></div>
-    <div style="padding:4px 2px 6px;font-size:13.5px;line-height:1.7;color:var(--t2)">
-      오늘은 <b id="msp-label"></b> 첫 영업일입니다.<br>
-      <span id="msp-range"></span> 기준 현재순이익은 아래와 같습니다.
-    </div>
-    <div class="sc" style="margin:10px 0 6px">
-      <div class="sc-l" style="color:var(--P);font-weight:700">현재순이익</div>
-      <div class="sc-v" id="msp-amount" style="color:var(--P);font-size:20px;font-weight:700"></div>
-    </div>
-    <div style="font-size:11.5px;color:var(--tm)">※ 선지급 급여 중 매출 미확인분은 제외한 금액입니다.</div>
-    <div class="mft"><button class="btn p" onclick="confirmMonthStartProfit()">확인</button></div>
+  <div class="mbox" style="max-width:440px"><div class="mhandle"></div>
+    <div class="mh"><div class="mt">💵 지난달 현재순이익 안내 (카톡 발송용)</div></div>
+    <div style="padding:2px 2px 8px;font-size:11.5px;color:var(--tm)">아래 문구를 복사해서 카톡으로 보내주세요.</div>
+    <textarea id="msp-text" readonly onclick="this.select()" style="width:100%;min-height:280px;font-size:13.5px;line-height:1.65;padding:12px;border:1px solid var(--bd);border-radius:var(--r2);resize:vertical;font-family:inherit;background:var(--sf2);color:var(--t1);box-sizing:border-box"></textarea>
+    <div class="mft"><button class="btn" onclick="copyMonthStartText()">📋 복사</button><button class="btn p" onclick="confirmMonthStartProfit()">확인</button></div>
   </div>
 </div>
  
@@ -3910,16 +3903,45 @@ function renderMonthStartPopup() {
     return false; // 미등록 상태
   }
 
-  // ② 지난달 입출금내역이 모두 등록된 경우에만 → 지난달 현재순이익 안내
+  // ② 지난달 입출금내역이 모두 등록된 경우에만 → 지난달 현재순이익 안내 (카톡 발송용 문자 형식)
   const d = calcNetIncomeForRange(prev.start, prev.end);
-  const netIncome = calcMatchedIncome(d).netIncome;
-  const fmtSignedRaw = n => { const v = Math.round(n||0); const abs = Math.abs(v).toLocaleString('ko-KR'); return v<0 ? `(₩${abs})` : `₩${abs}`; };
+  const m = calcMatchedIncome(d);
   const lastDay = new Date(prev.y, prev.m, 0).getDate();
-  document.getElementById('msp-label').textContent = `${now.getFullYear()}년 ${now.getMonth()+1}월`;
-  document.getElementById('msp-range').textContent = `지난달(${prev.y}년 ${prev.m}월) 1일 ~ ${prev.m}월 ${lastDay}일`;
-  document.getElementById('msp-amount').textContent = fmtSignedRaw(netIncome);
+  const fmtWon = n => { const v = Math.round(n||0); return (v<0?'-':'') + Math.abs(v).toLocaleString('ko-KR') + '원'; };
+  const wage = m.sgaMap['급여'] || 0;
+  const comm = m.sgaMap['통신비'] || 0;
+  const etc  = m.totalSGA - wage - comm;   // 급여·통신비를 제외한 나머지 판관비 항목 전부를 합산
+  const text = [
+    `${prev.m}월 ${lastDay}일 기준 현재 순이익은 아래와 같습니다.`,
+    fmtWon(m.netIncome),
+    `*선지급 급여 중 매출 미확인분은 제외한 금액입니다.`,
+    ``,
+    `상세내역`,
+    `매출액 ${fmtWon(d.totalRev)}`,
+    `급여 ${fmtWon(wage)}`,
+    `기타 ${fmtWon(etc)}`,
+    `통신비 ${fmtWon(comm)}`,
+    `판관비 합계 ${fmtWon(m.totalSGA)}`,
+    `영업이익 ${fmtWon(m.opProfit)}`,
+    `영업외손익 ${fmtWon(d.nonOp)}`,
+    `순이익 ${fmtWon(m.netIncome)}`,
+  ].join('\n');
+  document.getElementById('msp-text').value = text;
   openMo('mo-monthstart-profit');
   return true; // 순이익 안내 노출됨
+}
+// 카톡 발송용 문자 복사 (구형 브라우저·file:// 환경까지 폭넓게 동작하도록 execCommand 사용)
+function copyMonthStartText() {
+  const ta = document.getElementById('msp-text');
+  ta.focus();
+  ta.select();
+  ta.setSelectionRange(0, 99999);
+  try {
+    document.execCommand('copy');
+    toast('복사되었습니다. 카톡에 붙여넣기 해주세요.', 'ok');
+  } catch(e) {
+    toast('복사에 실패했습니다. 직접 드래그해서 복사해주세요.', 'err');
+  }
 }
 // 미등록 알림 확인 — 플래그를 남기지 않음: 데이터 등록 전까지는 다음 접속 시 다시 노출됨
 function confirmMonthStartAlert() {
