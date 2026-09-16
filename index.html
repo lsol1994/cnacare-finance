@@ -914,6 +914,19 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
       <button class="btn p" onclick="saveSysInfo()">✓ 저장</button>
     </div>
   </div>
+  <div class="card" style="margin-top:12px"><div class="ch"><span class="ct">🔔 월초 안내 팝업 테스트</span></div>
+    <div style="padding:14px 16px">
+      <div style="font-size:12.5px;color:var(--t2);margin-bottom:10px">
+        매달 첫 영업일 접속 시 자동으로 뜨는 "지난달 입출금내역 미등록 알림 / 지난달 현재순이익 안내" 팝업을 실제 데이터 기준으로 지금 바로 미리 볼 수 있습니다.<br>
+        (실제 자동 노출 조건인 "오늘이 이번 달 첫 영업일인지", "오늘 이미 확인했는지"는 건너뛰고, 지난달 입출금내역 등록 여부와 순이익 계산만 실제 데이터로 확인합니다.)
+      </div>
+      <button class="btn p" onclick="testMonthStartNotice()">🔔 지금 미리보기</button>
+      <button class="btn" onclick="resetMonthStartConfirm()" style="margin-left:8px">↺ 오늘자 확인 기록 초기화</button>
+      <div style="font-size:11px;color:var(--tm);margin-top:8px">
+        "확인 기록 초기화"는 순이익 안내 팝업의 "오늘 이미 확인함" 상태만 지웁니다. 초기화 후 오늘이 실제 이번 달 첫 영업일이면, 새로고침 시 자동 팝업도 다시 노출됩니다.
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- 계정과목 설정 -->
@@ -3879,7 +3892,12 @@ function checkMonthStartNotice() {
   const firstBizISO = getFirstBizDayISO(now.getFullYear(), now.getMonth());
   if (todayISO !== firstBizISO) return;                                         // 오늘이 이번 달 첫 영업일이 아니면 종료
   if (localStorage.getItem('monthStartConfirmed_' + todayISO) === '1') return;  // 순이익 안내까지 이미 확인 완료
-
+  renderMonthStartPopup();
+}
+/* 실제 데이터로 팝업 내용을 채우고 여는 부분 — 자동 체크(checkMonthStartNotice)와
+   설정 화면의 테스트 미리보기(testMonthStartNotice)가 동일한 계산 결과를 보도록 공유 */
+function renderMonthStartPopup() {
+  const now = new Date();
   const prev = getPrevMonthRange(now.getFullYear(), now.getMonth());
   const hasPrevEnd = ledger.some(t => t.date === prev.end);   // 지난달 마지막 날짜 거래 존재 여부 = 지난달 입출금내역 등록 완료 여부의 대리 지표
 
@@ -3889,7 +3907,7 @@ function checkMonthStartNotice() {
     document.getElementById('msa-label').textContent = `지난달(${prev.y}년 ${prev.m}월) 마지막 날짜`;
     document.getElementById('msa-date').textContent = prev.end.replace(/-/g,'.');
     openMo('mo-monthstart-alert');
-    return;
+    return false; // 미등록 상태
   }
 
   // ② 지난달 입출금내역이 모두 등록된 경우에만 → 지난달 현재순이익 안내
@@ -3901,6 +3919,7 @@ function checkMonthStartNotice() {
   document.getElementById('msp-range').textContent = `지난달(${prev.y}년 ${prev.m}월) 1일 ~ ${prev.m}월 ${lastDay}일`;
   document.getElementById('msp-amount').textContent = fmtSignedRaw(netIncome);
   openMo('mo-monthstart-profit');
+  return true; // 순이익 안내 노출됨
 }
 // 미등록 알림 확인 — 플래그를 남기지 않음: 데이터 등록 전까지는 다음 접속 시 다시 노출됨
 function confirmMonthStartAlert() {
@@ -3911,6 +3930,20 @@ function confirmMonthStartProfit() {
   const todayISO = toLocalISO(new Date());
   localStorage.setItem('monthStartConfirmed_' + todayISO, '1');
   closeMo('mo-monthstart-profit');
+}
+/* 설정 > 데이터 정비: 실제 자동 노출 조건(오늘=이번 달 첫 영업일, 오늘 확인 여부)은 건너뛰고
+   지난달 등록 상태·순이익 계산 결과만 실제 데이터 기준으로 지금 바로 확인 */
+function testMonthStartNotice() {
+  const isProfit = renderMonthStartPopup();
+  toast(isProfit
+    ? '테스트 미리보기: 지난달 실제 데이터로 계산된 순이익 팝업입니다.'
+    : '테스트 미리보기: 지난달 마지막 날짜 입출금내역이 없어 미등록 알림이 표시됩니다.', isProfit ? 'ok' : '');
+}
+/* 설정 > 데이터 정비: "오늘 이미 확인함" 로컬 플래그만 제거 (지난달 데이터 자체는 건드리지 않음) */
+function resetMonthStartConfirm() {
+  const todayISO = toLocalISO(new Date());
+  localStorage.removeItem('monthStartConfirmed_' + todayISO);
+  toast('오늘자 확인 기록을 초기화했습니다. 새로고침하면 조건 충족 시 자동 팝업이 다시 노출됩니다.', 'ok');
 }
 
 /* 외상매출금 요약 필터 상태 (연도/월) — 최초 진입 시 데이터 기준 최근 월로 자동 설정됨 (ensureARDefaultPeriod 참고) */
