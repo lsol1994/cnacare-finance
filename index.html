@@ -1253,6 +1253,36 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
     <div class="mft"><button class="btn" onclick="closeMo('mo-rule-add')">취소</button><button class="btn p" onclick="saveRule()">✓ 저장</button></div>
   </div>
 </div>
+
+<!-- 월초 안내: 지난달 입출금내역 미등록 경고 (항상 이 팝업이 먼저 체크됨) -->
+<div class="mo" id="mo-monthstart-alert">
+  <div class="mbox" style="max-width:420px"><div class="mhandle"></div>
+    <div class="mh"><div class="mt">⚠️ 입출금내역 미등록</div></div>
+    <div style="padding:4px 2px 12px;font-size:13.5px;line-height:1.7;color:var(--t2)">
+      오늘은 이번 달 첫 영업일입니다.<br>
+      <b id="msa-label"></b>(<b id="msa-date"></b>)자 입출금내역이 아직 등록되지 않았습니다.<br>
+      입출금내역 업로드 및 정리를 완료한 후 다시 접속해주세요.
+    </div>
+    <div class="mft"><button class="btn p" onclick="confirmMonthStartAlert()">확인</button></div>
+  </div>
+</div>
+
+<!-- 월초 안내: 지난달 현재순이익 안내 (지난달 입출금내역이 모두 등록된 경우에만 노출) -->
+<div class="mo" id="mo-monthstart-profit">
+  <div class="mbox" style="max-width:420px"><div class="mhandle"></div>
+    <div class="mh"><div class="mt">💵 지난달 현재순이익 안내</div></div>
+    <div style="padding:4px 2px 6px;font-size:13.5px;line-height:1.7;color:var(--t2)">
+      오늘은 <b id="msp-label"></b> 첫 영업일입니다.<br>
+      <span id="msp-range"></span> 기준 현재순이익은 아래와 같습니다.
+    </div>
+    <div class="sc" style="margin:10px 0 6px">
+      <div class="sc-l" style="color:var(--P);font-weight:700">현재순이익</div>
+      <div class="sc-v" id="msp-amount" style="color:var(--P);font-size:20px;font-weight:700"></div>
+    </div>
+    <div style="font-size:11.5px;color:var(--tm)">※ 선지급 급여 중 매출 미확인분은 제외한 금액입니다.</div>
+    <div class="mft"><button class="btn p" onclick="confirmMonthStartProfit()">확인</button></div>
+  </div>
+</div>
  
 <div class="twr" id="twr"></div>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
@@ -1497,6 +1527,7 @@ async function initApp() {
     renderL(); renderC(); renderExp();
     ['sale','buy-tax','buy-ex'].forEach(m=>renderT(m));
     updBadges(); updSbDate();
+    checkMonthStartNotice();
   }
 }
  
@@ -1582,7 +1613,7 @@ function closeMo(id) {
   if(id==='mo-card-up')  { document.getElementById('card-pvw').style.display='none'; document.getElementById('card-err').style.display='none'; document.getElementById('card-fi').value=''; cardPvw=[]; }
 }
 // 입력 모달은 overlay 클릭으로 닫히지 않음 (실수 방지)
-const NO_OVERLAY_CLOSE = new Set(['mo-l-add','mo-exp-add','mo-t-add','mo-c-add','mo-acct-add','mo-rule-add','mo-bank-up']);
+const NO_OVERLAY_CLOSE = new Set(['mo-l-add','mo-exp-add','mo-t-add','mo-c-add','mo-acct-add','mo-rule-add','mo-bank-up','mo-monthstart-alert','mo-monthstart-profit']);
 document.querySelectorAll('.mo').forEach(o => o.addEventListener('click', e => {
   if(e.target === o && !NO_OVERLAY_CLOSE.has(o.id)) o.classList.remove('open');
 }));
@@ -3792,6 +3823,94 @@ function renderCurrentProfit(d) {
       </div>
     </div>
   </div>`;
+}
+
+/* ══════════════════════════════
+   월초 첫 영업일 안내 팝업 — 지난달 현재순이익
+   - 매달 첫 영업일(주말이면 다음 월요일)에 접속 시 체크
+   - 우선순위: 지난달 마지막 날짜 입출금내역이 없으면 "미등록 알림"만 노출(순이익 팝업은 뜨지 않음)
+     → 등록 완료된 경우에만 지난달 현재순이익 안내 팝업 노출
+   - "확인" 버튼을 눌러야만 종료(브라우저별 로컬 저장) — 그 전까지는 재접속 시 계속 노출
+   ══════════════════════════════ */
+// toISOString()은 UTC 변환 과정에서 자정 부근(KST)에 날짜가 하루 밀릴 수 있어,
+// 이 기능은 로컬 날짜(y/m/d)를 직접 조합해 안전하게 문자열화한다.
+function toLocalISO(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function getFirstBizDayISO(year, monthIdx0) {
+  const d = new Date(year, monthIdx0, 1);            // 해당 월 1일
+  const dow = d.getDay();                             // 0=일요일, 6=토요일
+  if (dow === 6) d.setDate(d.getDate() + 2);           // 토요일 → 다음 월요일
+  else if (dow === 0) d.setDate(d.getDate() + 1);      // 일요일 → 다음 월요일
+  return toLocalISO(d);
+}
+// 기준 연/월(0-based monthIdx)의 "지난달" 연/월/시작일/마지막일을 계산
+function getPrevMonthRange(year, monthIdx0) {
+  const py = monthIdx0 === 0 ? year - 1 : year;
+  const pm = monthIdx0 === 0 ? 11 : monthIdx0 - 1;      // 0-based
+  const start = `${py}-${String(pm+1).padStart(2,'0')}-01`;
+  const endDate = new Date(py, pm + 1, 0);              // 지난달 마지막 날
+  const end = toLocalISO(endDate);
+  return { y: py, m: pm+1, start, end };
+}
+/* calcFSData와 동일한 P&L 공식을 사용하되, 재무제표 화면(DOM/fsTab) 상태에 의존하지 않는
+   순수 계산 버전 — 팝업 체크용으로 별도 분리 (재무제표 화면 렌더링에는 영향 없음) */
+function calcNetIncomeForRange(start, end) {
+  const ledPeriod = fsFilter(ledger, 'date', start, end);
+  const totalRev = ledPeriod.filter(t => t.type==='income' && FS_SALE_ACCTS.includes(t.acct))
+    .reduce((s,t)=>s+Number(t.amount||0), 0);
+  const taxBuyAmt = fsFilter(taxInv,'date',start,end).filter(t=>t.ditype==='매입')
+    .reduce((s,t)=>s+Number(t.supply||0), 0);
+  const grossProfit = totalRev - taxBuyAmt;
+  const sgaMap = {};
+  ledPeriod.filter(t => t.type==='expense' && !FS_NONOP_EXPENSE_ACCTS.includes(t.acct))
+    .forEach(t => { const k = FS_SGA_ACCTS.includes(t.acct) ? t.acct : '기타'; sgaMap[k] = (sgaMap[k]||0) + Number(t.amount||0); });
+  const opProfit = grossProfit - Object.values(sgaMap).reduce((s,v)=>s+v, 0);
+  const otherInc = ledPeriod.filter(t => t.type==='income' && FS_OTHER_INCOME_ACCTS.includes(t.acct))
+    .reduce((s,t)=>s+Number(t.amount||0), 0);
+  const interestExp = ledPeriod.filter(t => t.type==='expense' && t.acct==='이자비용')
+    .reduce((s,t)=>s+Number(t.amount||0), 0);
+  const nonOp = otherInc - interestExp;
+  return { start, end, sgaMap, grossProfit, nonOp, netIncome: opProfit + nonOp };
+}
+function checkMonthStartNotice() {
+  const now = new Date();
+  const todayISO = toLocalISO(now);
+  const firstBizISO = getFirstBizDayISO(now.getFullYear(), now.getMonth());
+  if (todayISO !== firstBizISO) return;                                         // 오늘이 이번 달 첫 영업일이 아니면 종료
+  if (localStorage.getItem('monthStartConfirmed_' + todayISO) === '1') return;  // 순이익 안내까지 이미 확인 완료
+
+  const prev = getPrevMonthRange(now.getFullYear(), now.getMonth());
+  const hasPrevEnd = ledger.some(t => t.date === prev.end);   // 지난달 마지막 날짜 거래 존재 여부 = 지난달 입출금내역 등록 완료 여부의 대리 지표
+
+  // ① 지난달 입출금내역이 아직 등록되지 않은 경우 → 미등록 알림만 노출 (순이익 팝업은 노출하지 않음)
+  //    이 알림은 "확인"을 눌러도 별도 플래그를 남기지 않아, 데이터가 실제 등록될 때까지 접속할 때마다 계속 노출됨
+  if (!hasPrevEnd) {
+    document.getElementById('msa-label').textContent = `지난달(${prev.y}년 ${prev.m}월) 마지막 날짜`;
+    document.getElementById('msa-date').textContent = prev.end.replace(/-/g,'.');
+    openMo('mo-monthstart-alert');
+    return;
+  }
+
+  // ② 지난달 입출금내역이 모두 등록된 경우에만 → 지난달 현재순이익 안내
+  const d = calcNetIncomeForRange(prev.start, prev.end);
+  const netIncome = calcMatchedIncome(d).netIncome;
+  const fmtSignedRaw = n => { const v = Math.round(n||0); const abs = Math.abs(v).toLocaleString('ko-KR'); return v<0 ? `(₩${abs})` : `₩${abs}`; };
+  const lastDay = new Date(prev.y, prev.m, 0).getDate();
+  document.getElementById('msp-label').textContent = `${now.getFullYear()}년 ${now.getMonth()+1}월`;
+  document.getElementById('msp-range').textContent = `지난달(${prev.y}년 ${prev.m}월) 1일 ~ ${prev.m}월 ${lastDay}일`;
+  document.getElementById('msp-amount').textContent = fmtSignedRaw(netIncome);
+  openMo('mo-monthstart-profit');
+}
+// 미등록 알림 확인 — 플래그를 남기지 않음: 데이터 등록 전까지는 다음 접속 시 다시 노출됨
+function confirmMonthStartAlert() {
+  closeMo('mo-monthstart-alert');
+}
+// 순이익 안내 확인 — 오늘 하루 더 이상 노출되지 않도록 플래그 저장
+function confirmMonthStartProfit() {
+  const todayISO = toLocalISO(new Date());
+  localStorage.setItem('monthStartConfirmed_' + todayISO, '1');
+  closeMo('mo-monthstart-profit');
 }
 
 /* 외상매출금 요약 필터 상태 (연도/월) — 최초 진입 시 데이터 기준 최근 월로 자동 설정됨 (ensureARDefaultPeriod 참고) */
