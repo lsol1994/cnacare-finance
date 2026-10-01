@@ -3694,62 +3694,94 @@ function confirmARRefundLink(expenseId) {
 }
 
 /* ══════════════════════════════
-   현재순이익: 선지급된 급여 중 매칭되는 매출액이
-   들어오지 않은 건은 제외하고, 실제 입금된 비율만큼만
-   급여비용으로 인정하여 재계산한 순이익
+   현재순이익: "그 기간에 지급한 급여"와 "그 급여로 벌어들인 매출"을 짝지어 계산한 실질 순이익
    ══════════════════════════════
-   - 환자·간병인 그룹의 (실입금액/예상매출액) 비율을 구해
-     해당 그룹에 속한 급여 지급건의 지급금액에 그대로 곱해 인정액 산출
-   - 예상매출액 자체가 없는(AR 추적 대상이 아닌) 급여건은 매칭 로직 대상이 아니므로 전액 인정
-   - 조회 기간(d.start~d.end)의 지급일자 기준 급여 지출결의서만 집계 */
+   - 급여: 조회 기간(d.start~d.end) 지급일자 기준 급여 지출결의서
+   - 매출액:
+     ① 기간 내 급여건에 매칭되는 입금 → 입금일과 무관하게 해당 기간 매출로 인정
+        (예: 9월 지급 급여의 매출이 10월 초에 입금돼도 9월 매출로 반영 = 9월에 일해서 번 돈)
+     ② 다른 기간 급여건에 매칭되는 입금 → 그 기간 매출이므로 이번 기간에서 제외
+        (예: 8월 지급 급여의 매출이 9월에 입금된 건은 8월 몫)
+     ③ 급여건과 매칭되지 않는 입금(이름매칭실패·매칭그룹없음·예상매출 초과분) → 기존처럼 입금일 기준
+   - 매칭 배분: 환자·간병인 그룹 안에서 지급건(지급일 순)과 입금(입금일 순)을 선입선출로 예상매출액만큼 채움
+   - 급여 인정액 = 지급액 × (배분된 입금액 ÷ 예상매출액, 최대 100%) — 아직 입금 안 된 급여분은 제외
+   - 예상매출액이 없는(AR 추적 대상이 아닌) 급여건은 전액 인정
+   - 입금은 "현재 등록된 전체 입출금내역" 기준이라, 늦게 볼수록(입금이 더 들어올수록) 정확해짐 */
+function allocateARDeposits() {
+  const { rows } = computeARMatching();
+  const payById = {};
+  expReqs.forEach(t => { payById[String(t.id)] = t; });
+  const payAlloc = {};  // 지급건 id -> 배분된 입금액
+  const depAlloc = {};  // 입금건 id -> { parts:[{payId,payDate,amt}], leftover }
+  const byDate = k => (a,b) => (a[k]||'').localeCompare(b[k]||'') || String(a.id).localeCompare(String(b.id));
+  rows.forEach(g => {
+    if(!g.patient) return; // 환자명 미인식 그룹은 입금 매칭 대상 아님(computeARMatching과 동일)
+    const pays = g.payIds.map(id => payById[String(id)]).filter(Boolean).sort(byDate('payDate'));
+    const deps = [...g.recvRows].sort(byDate('date'));
+    let pi = 0, remain = pays.length ? Number(pays[0].expectedRev||0) : 0;
+    deps.forEach(dep => {
+      let left = Number(dep.amount||0);
+      const parts = [];
+      while(left > 0 && pi < pays.length) {
+        if(remain <= 0) { pi++; if(pi < pays.length) remain = Number(pays[pi].expectedRev||0); continue; }
+        const take = Math.min(left, remain);
+        const pay = pays[pi];
+        parts.push({ payId: pay.id, payDate: pay.payDate||'', amt: take });
+        payAlloc[String(pay.id)] = (payAlloc[String(pay.id)]||0) + take;
+        left -= take; remain -= take;
+      }
+      depAlloc[String(dep.id)] = { parts, leftover: left };
+    });
+  });
+  return { payAlloc, depAlloc };
+}
 function calcMatchedIncome(d) {
-  const { rows: arRows } = computeARMatching();
+  const { payAlloc, depAlloc } = allocateARDeposits();
+  const inRange = x => !!x && x >= d.start && x <= d.end;
 
-  // 성공적으로 환자명이 인식된 그룹의 매칭비율 lookup (환자|간병인 키)
-  const ratioMap = {};
-  arRows.forEach(g => {
-    if(!g.patient) return; // 미인식 그룹은 개별 id로 아래에서 별도 조회
-    const key = `${patientMatchKey(g.patient)}|${caregiverMatchKey(g.caregiver)}`;
-    ratioMap[key] = g.expectedTotal>0 ? Math.min(1, g.receivedTotal/g.expectedTotal) : 0;
+  // ── 매출액 재계산 (급여 지급기간 기준) ──
+  let adjRev = 0, revLateIn = 0, revOtherOut = 0;  // revLateIn: 기간 밖 입금이지만 기간 내 급여 몫 / revOtherOut: 기간 내 입금이지만 다른 기간 급여 몫
+  ledger.filter(t => t.type==='income' && FS_SALE_ACCTS.includes(t.acct)).forEach(t => {
+    const amt = Number(t.amount||0);
+    const depIn = inRange((t.date||'').slice(0,10));
+    const a = depAlloc[String(t.id)];
+    if(!a) { if(depIn) adjRev += amt; return; }            // ③ 매칭 안 된 입금: 입금일 기준
+    a.parts.forEach(p => {
+      if(inRange(p.payDate)) { adjRev += p.amt; if(!depIn) revLateIn += p.amt; }   // ①
+      else if(depIn) revOtherOut += p.amt;                                         // ②
+    });
+    if(depIn) adjRev += a.leftover;                          // ③ 예상매출 초과분: 입금일 기준
   });
 
-  const wagePayInPeriod = expReqs.filter(t => t.acct==='급여' && t.payDate>=d.start && t.payDate<=d.end);
-
+  // ── 급여 인정액 (지급건별 배분 입금 비율) ──
+  const wagePayInPeriod = expReqs.filter(t => t.acct==='급여' && inRange(t.payDate));
   let matchedWage = 0, excludedWage = 0;
   const detail = [];
   wagePayInPeriod.forEach(t => {
     const amt = Number(t.amount||0);
-    let ratio;
-    if(!Number(t.expectedRev||0)) {
-      ratio = 1; // AR 추적 대상이 아닌 급여건(예상매출액 미입력) → 매칭 로직 미적용, 전액 인정
-    } else {
-      const patient = extractPatientName(t.title);
-      if(patient) {
-        const key = `${patientMatchKey(patient)}|${caregiverMatchKey(t.payee)}`;
-        ratio = ratioMap[key] !== undefined ? ratioMap[key] : 0;
-      } else {
-        // 환자명 미인식 건은 computeARMatching에서 건별 고유 그룹으로 처리되므로 그 결과를 그대로 조회
-        const g = arRows.find(x => x.payIds && x.payIds.includes(t.id));
-        ratio = g ? (g.expectedTotal>0 ? Math.min(1, g.receivedTotal/g.expectedTotal) : 0) : 0;
-      }
-    }
+    const exp = Number(t.expectedRev||0);
+    const recv = exp ? (payAlloc[String(t.id)]||0) : 0;
+    const ratio = exp ? Math.min(1, recv/exp) : 1; // 예상매출액 미입력 급여건은 전액 인정
     const matchedAmt  = Math.round(amt * ratio);
     const excludedAmt = amt - matchedAmt;
     matchedWage  += matchedAmt;
     excludedWage += excludedAmt;
-    detail.push({ id:t.id, payDate:t.payDate, title:t.title, payee:t.payee, amount:amt, ratio, matchedAmt, excludedAmt });
+    detail.push({ id:t.id, payDate:t.payDate, title:t.title, payee:t.payee, amount:amt, expectedRev:exp, recvAmt:recv, ratio, matchedAmt, excludedAmt });
   });
 
+  const taxBuyAmt = d.totalRev - d.grossProfit;           // 매입(세금계산서)은 기존 기준 유지
+  const grossProfitAdj = adjRev - taxBuyAmt;
   const sgaMapAdj = { ...d.sgaMap, 급여: matchedWage };
   const totalSGAAdj = Object.values(sgaMapAdj).reduce((s,v)=>s+v, 0);
-  const opProfitAdj = d.grossProfit - totalSGAAdj;
+  const opProfitAdj = grossProfitAdj - totalSGAAdj;
   const netIncomeAdj = opProfitAdj + d.nonOp;
 
   return {
+    totalRev: adjRev, revLateIn, revOtherOut, grossProfit: grossProfitAdj,
     sgaMap: sgaMapAdj, totalSGA: totalSGAAdj, opProfit: opProfitAdj, netIncome: netIncomeAdj,
-    originalWage: d.sgaMap['급여']||0, matchedWage, excludedWage,
+    originalRev: d.totalRev, originalWage: d.sgaMap['급여']||0, matchedWage, excludedWage,
     originalTotalSGA: d.totalSGA, originalOpProfit: d.opProfit, originalNetIncome: d.netIncome,
-    detail: detail.sort((a,b)=>b.excludedAmt-a.excludedAmt),
+    detail: detail.sort((x,y)=>y.excludedAmt-x.excludedAmt),
   };
 }
 
@@ -3765,11 +3797,11 @@ function renderCurrentProfit(d) {
   const sgaRows = Object.entries(m.sgaMap).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]);
 
   return `<div class="fs-wrap">
-    ${fsHeader('현재순이익','선지급 급여 중 매출 미확인분을 제외한 실질 순이익', d.label)}
+    ${fsHeader('현재순이익','기간 내 지급 급여와 그 급여의 매출(늦게 들어온 입금 포함)을 짝지은 실질 순이익', d.label)}
 
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px">
       <div class="sc"><div class="sc-l">회계기준 당기순이익</div><div class="sc-v" style="color:var(--t2)">${m.originalNetIncome<0?`(₩${fmtRaw(Math.abs(m.originalNetIncome))})`:`₩${fmtRaw(m.originalNetIncome)}`}</div></div>
-      <div class="sc"><div class="sc-l" style="color:var(--O);font-weight:700">제외된 미매칭 급여</div><div class="sc-v" style="color:var(--O)">₩${fmtRaw(m.excludedWage)}</div></div>
+      <div class="sc"><div class="sc-l" style="color:var(--O);font-weight:700">제외된 미입금 급여</div><div class="sc-v" style="color:var(--O)">₩${fmtRaw(m.excludedWage)}</div></div>
       <div class="sc"><div class="sc-l" style="color:var(--P);font-weight:700">현재순이익</div><div class="sc-v" style="color:var(--P);font-size:18px;font-weight:700">${m.netIncome<0?`(₩${fmtRaw(Math.abs(m.netIncome))})`:`₩${fmtRaw(m.netIncome)}`}</div></div>
     </div>
 
@@ -3778,7 +3810,14 @@ function renderCurrentProfit(d) {
       <div class="tw"><table>
         <thead><tr><th>항목</th><th style="text-align:right;width:140px">회계기준(원)</th><th style="text-align:right;width:140px">현재순이익 기준(원)</th></tr></thead>
         <tbody>
-          <tr><td>매출액</td><td class="nm">${fmtRaw(d.totalRev)}</td><td class="nm">${fmtRaw(d.totalRev)}</td></tr>
+          <tr style="background:#EFF6FF">
+            <td>매출액</td>
+            <td class="nm">${fmtRaw(d.totalRev)}</td>
+            <td class="nm" style="color:var(--P);font-weight:700">${fmtRaw(m.totalRev)}</td>
+          </tr>
+          ${m.revLateIn ? `<tr><td style="padding-left:20px;font-size:12px;color:var(--t3)">└ (+) 기간 밖 입금 중 이 기간 급여 몫</td><td class="nm" style="color:var(--t3)">-</td><td class="nm" style="font-size:12px;color:var(--G)">+${fmtRaw(m.revLateIn)}</td></tr>` : ''}
+          ${m.revOtherOut ? `<tr><td style="padding-left:20px;font-size:12px;color:var(--t3)">└ (−) 기간 내 입금 중 다른 기간 급여 몫</td><td class="nm" style="color:var(--t3)">-</td><td class="nm" style="font-size:12px;color:var(--R)">−${fmtRaw(m.revOtherOut)}</td></tr>` : ''}
+          ${d.totalRev !== d.grossProfit ? `<tr><td>매입(세금계산서)</td><td class="nm">${fmtRaw(d.totalRev - d.grossProfit)}</td><td class="nm">${fmtRaw(d.totalRev - d.grossProfit)}</td></tr>` : ''}
           <tr style="background:#FFF7ED">
             <td>급여</td>
             <td class="nm">${fmtRaw(m.originalWage)}</td>
@@ -3825,7 +3864,7 @@ function renderCurrentProfit(d) {
         </tbody>
       </table></div>
       <div style="padding:8px 14px;font-size:11.5px;color:var(--t3);border-top:1px solid var(--bd)">
-        매칭률 = 환자·간병인별 실 입금액 ÷ 예상매출액 (최대 100%). 예상매출액을 입력하지 않은 급여건은 매칭 대상이 아니므로 전액(100%) 인정됩니다.
+        매칭률 = 이 지급건에 배분된 실 입금액 ÷ 예상매출액 (최대 100%). 같은 환자·간병인의 입금은 지급일이 빠른 건부터 채워지며, 입금일이 조회 기간 이후여도 반영됩니다. 예상매출액을 입력하지 않은 급여건은 매칭 대상이 아니므로 전액(100%) 인정됩니다.
       </div>
     </div>
   </div>`;
@@ -3911,13 +3950,15 @@ function renderMonthStartPopup() {
   const wage = m.sgaMap['급여'] || 0;
   const comm = m.sgaMap['통신비'] || 0;
   const etc  = m.totalSGA - wage - comm;   // 급여·통신비를 제외한 나머지 판관비 항목 전부를 합산
+  const asOf = `${now.getMonth()+1}월 ${now.getDate()}일`;
   const text = [
-    `${prev.m}월 ${lastDay}일 기준 현재 순이익은 아래와 같습니다.`,
+    `${prev.m}월 순이익은 아래와 같습니다.`,
     fmtWon(m.netIncome),
-    `*선지급 급여 중 매출 미확인분은 제외한 금액입니다.`,
+    `*${prev.m}월(1일~${lastDay}일) 지급 급여와, 그 급여에 대한 매출(${asOf}까지 입금분)을 기준으로 계산했습니다.`,
+    `*아직 매출이 입금되지 않은 급여는 제외한 금액입니다.`,
     ``,
     `상세내역`,
-    `매출액 ${fmtWon(d.totalRev)}`,
+    `매출액 ${fmtWon(m.totalRev)}`,
     `급여 ${fmtWon(wage)}`,
     `기타 ${fmtWon(etc)}`,
     `통신비 ${fmtWon(comm)}`,
