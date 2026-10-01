@@ -1289,6 +1289,22 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
     <div class="mft"><button class="btn" onclick="copyMonthStartText()">📋 복사</button><button class="btn p" onclick="confirmMonthStartProfit()">확인</button></div>
   </div>
 </div>
+
+<!-- 월별 순이익 안내 문자 (카톡 발송용) — 원하는 월을 골라 언제든 복사 -->
+<div class="mo" id="mo-profit-notice">
+  <div class="mbox" style="max-width:440px"><div class="mhandle"></div>
+    <div class="mh"><div class="mt">💬 월별 순이익 안내 문자</div><button class="mc" onclick="closeMo('mo-profit-notice')">✕</button></div>
+    <div style="display:flex;gap:8px;align-items:center;padding:2px 2px 8px">
+      <select id="pn-year" class="fi" style="width:auto" onchange="renderProfitNotice()"></select>
+      <select id="pn-month" class="fi" style="width:auto" onchange="renderProfitNotice()"></select>
+      <button class="btn" style="padding:6px 10px" onclick="shiftProfitNoticeMonth(-1)" title="이전 달">◀</button>
+      <button class="btn" style="padding:6px 10px" onclick="shiftProfitNoticeMonth(1)" title="다음 달">▶</button>
+    </div>
+    <div id="pn-warn" style="display:none;padding:8px 10px;margin-bottom:8px;border-radius:var(--r2);background:#FFF7ED;color:var(--O);font-size:11.5px;line-height:1.5"></div>
+    <textarea id="pn-text" readonly onclick="this.select()" style="width:100%;min-height:280px;font-size:13.5px;line-height:1.65;padding:12px;border:1px solid var(--bd);border-radius:var(--r2);resize:vertical;font-family:inherit;background:var(--sf2);color:var(--t1);box-sizing:border-box"></textarea>
+    <div class="mft"><button class="btn" onclick="closeMo('mo-profit-notice')">닫기</button><button class="btn p" onclick="copyProfitNoticeText()">📋 복사</button></div>
+  </div>
+</div>
  
 <div class="twr" id="twr"></div>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
@@ -3799,6 +3815,10 @@ function renderCurrentProfit(d) {
   return `<div class="fs-wrap">
     ${fsHeader('현재순이익','기간 내 지급 급여와 그 급여의 매출(늦게 들어온 입금 포함)을 짝지은 실질 순이익', d.label)}
 
+    <div class="no-print" style="display:flex;justify-content:flex-end;margin-bottom:10px">
+      <button class="btn p" onclick="${(() => { const sm = d.start.slice(0,7), em = d.end.slice(0,7); return sm===em ? `openProfitNotice(${parseInt(sm.slice(0,4))},${parseInt(sm.slice(5,7))})` : 'openProfitNotice()'; })()}">💬 월별 순이익 안내 문자 복사</button>
+    </div>
+
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px">
       <div class="sc"><div class="sc-l">회계기준 당기순이익</div><div class="sc-v" style="color:var(--t2)">${m.originalNetIncome<0?`(₩${fmtRaw(Math.abs(m.originalNetIncome))})`:`₩${fmtRaw(m.originalNetIncome)}`}</div></div>
       <div class="sc"><div class="sc-l" style="color:var(--O);font-weight:700">제외된 미입금 급여</div><div class="sc-v" style="color:var(--O)">₩${fmtRaw(m.excludedWage)}</div></div>
@@ -3943,33 +3963,95 @@ function renderMonthStartPopup() {
   }
 
   // ② 지난달 입출금내역이 모두 등록된 경우에만 → 지난달 현재순이익 안내 (카톡 발송용 문자 형식)
-  const d = calcNetIncomeForRange(prev.start, prev.end);
-  const m = calcMatchedIncome(d);
-  const lastDay = new Date(prev.y, prev.m, 0).getDate();
-  const fmtWon = n => { const v = Math.round(n||0); return (v<0?'-':'') + Math.abs(v).toLocaleString('ko-KR') + '원'; };
-  const wage = m.sgaMap['급여'] || 0;
-  const comm = m.sgaMap['통신비'] || 0;
-  const etc  = m.totalSGA - wage - comm;   // 급여·통신비를 제외한 나머지 판관비 항목 전부를 합산
-  const asOf = `${now.getMonth()+1}월 ${now.getDate()}일`;
-  const text = [
-    `${prev.m}월 순이익은 아래와 같습니다.`,
-    fmtWon(m.netIncome),
-    `*${prev.m}월(1일~${lastDay}일) 지급 급여와, 그 급여에 대한 매출(${asOf}까지 입금분)을 기준으로 계산했습니다.`,
-    `*아직 매출이 입금되지 않은 급여는 제외한 금액입니다.`,
-    ``,
-    `상세내역`,
-    `매출액 ${fmtWon(m.totalRev)}`,
-    `급여 ${fmtWon(wage)}`,
-    `기타 ${fmtWon(etc)}`,
-    `통신비 ${fmtWon(comm)}`,
-    `판관비 합계 ${fmtWon(m.totalSGA)}`,
-    `영업이익 ${fmtWon(m.opProfit)}`,
-    `영업외손익 ${fmtWon(d.nonOp)}`,
-    `순이익 ${fmtWon(m.netIncome)}`,
-  ].join('\n');
+  const text = buildProfitNoticeText(prev.y, prev.m);
   document.getElementById('msp-text').value = text;
   openMo('mo-monthstart-profit');
   return true; // 순이익 안내 노출됨
+}
+/* 월별 순이익 안내 문자 생성 — 월초 팝업과 "월별 순이익 안내 문자" 창이 같은 문구를 사용
+   y: 연도, m: 월(1~12). 현재순이익(calcMatchedIncome)과 동일한 기준:
+   그 달 지급 급여 + 그 급여에 대한 매출(오늘까지 입금분), 미입금 급여는 제외 */
+function buildProfitNoticeText(y, m) {
+  const now = new Date();
+  const start = `${y}-${String(m).padStart(2,'0')}-01`;
+  const lastDay = new Date(y, m, 0).getDate();
+  const end = `${y}-${String(m).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
+  const d = calcNetIncomeForRange(start, end);
+  const r = calcMatchedIncome(d);
+  const fmtWon = n => { const v = Math.round(n||0); return (v<0?'-':'') + Math.abs(v).toLocaleString('ko-KR') + '원'; };
+  const wage = r.sgaMap['급여'] || 0;
+  const comm = r.sgaMap['통신비'] || 0;
+  const etc  = r.totalSGA - wage - comm;   // 급여·통신비를 제외한 나머지 판관비 항목 전부를 합산
+  const asOf = `${now.getMonth()+1}월 ${now.getDate()}일`;
+  return [
+    `${m}월 순이익은 아래와 같습니다.`,
+    fmtWon(r.netIncome),
+    `*${m}월(1일~${lastDay}일) 지급 급여와, 그 급여에 대한 매출(${asOf}까지 입금분)을 기준으로 계산했습니다.`,
+    `*아직 매출이 입금되지 않은 급여는 제외한 금액입니다.`,
+    ``,
+    `상세내역`,
+    `매출액 ${fmtWon(r.totalRev)}`,
+    `급여 ${fmtWon(wage)}`,
+    `기타 ${fmtWon(etc)}`,
+    `통신비 ${fmtWon(comm)}`,
+    `판관비 합계 ${fmtWon(r.totalSGA)}`,
+    `영업이익 ${fmtWon(r.opProfit)}`,
+    `영업외손익 ${fmtWon(d.nonOp)}`,
+    `순이익 ${fmtWon(r.netIncome)}`,
+  ].join('\n');
+}
+/* ── 월별 순이익 안내 문자 창 ── */
+function openProfitNotice(y, m) {
+  const now = new Date();
+  if(!y || !m) { // 기본값: 지난달
+    const prev = getPrevMonthRange(now.getFullYear(), now.getMonth());
+    y = prev.y; m = prev.m;
+  }
+  // 연도 목록: 데이터가 있는 가장 이른 해 ~ 올해
+  const years = [...ledger.map(t=>t.date), ...expReqs.map(t=>t.payDate)]
+    .map(x => parseInt((x||'').slice(0,4))).filter(v => v > 2000);
+  const minY = Math.min(y, now.getFullYear(), ...(years.length ? years : [now.getFullYear()]));
+  const ySel = document.getElementById('pn-year');
+  ySel.innerHTML = '';
+  for(let yy = now.getFullYear(); yy >= minY; yy--) ySel.insertAdjacentHTML('beforeend', `<option value="${yy}">${yy}년</option>`);
+  document.getElementById('pn-month').innerHTML = Array.from({length:12}, (_,i) => `<option value="${i+1}">${i+1}월</option>`).join('');
+  ySel.value = String(y);
+  document.getElementById('pn-month').value = String(m);
+  renderProfitNotice();
+  openMo('mo-profit-notice');
+}
+function shiftProfitNoticeMonth(delta) {
+  const ySel = document.getElementById('pn-year'), mSel = document.getElementById('pn-month');
+  let y = parseInt(ySel.value), m = parseInt(mSel.value) + delta;
+  if(m < 1) { m = 12; y--; } else if(m > 12) { m = 1; y++; }
+  if(![...ySel.options].some(o => o.value === String(y))) return; // 목록 범위를 벗어나면 이동하지 않음
+  ySel.value = String(y); mSel.value = String(m);
+  renderProfitNotice();
+}
+function renderProfitNotice() {
+  const y = parseInt(document.getElementById('pn-year').value);
+  const m = parseInt(document.getElementById('pn-month').value);
+  const now = new Date();
+  const lastDayISO = `${y}-${String(m).padStart(2,'0')}-${String(new Date(y, m, 0).getDate()).padStart(2,'0')}`;
+  const warn = document.getElementById('pn-warn');
+  const curYM = now.getFullYear()*12 + now.getMonth(), selYM = y*12 + (m-1);
+  let msg = '';
+  if(selYM > curYM)       msg = '아직 오지 않은 달이라 계산할 데이터가 없습니다.';
+  else if(selYM === curYM) msg = '이번 달은 아직 진행 중이라 금액이 계속 바뀝니다. 월이 끝난 뒤 다시 확인하세요.';
+  else if(!ledger.some(t => t.date === lastDayISO)) msg = `${m}월 마지막 날(${lastDayISO.replace(/-/g,'.')}) 입출금내역이 없습니다. 입출금내역이 다 등록되지 않았을 수 있어요.`;
+  warn.textContent = msg ? '⚠️ ' + msg : '';
+  warn.style.display = msg ? 'block' : 'none';
+  document.getElementById('pn-text').value = buildProfitNoticeText(y, m);
+}
+function copyProfitNoticeText() {
+  const ta = document.getElementById('pn-text');
+  ta.focus(); ta.select(); ta.setSelectionRange(0, 99999);
+  try {
+    document.execCommand('copy');
+    toast('복사되었습니다. 카톡에 붙여넣기 해주세요.', 'ok');
+  } catch(e) {
+    toast('복사에 실패했습니다. 직접 드래그해서 복사해주세요.', 'err');
+  }
 }
 // 카톡 발송용 문자 복사 (구형 브라우저·file:// 환경까지 폭넓게 동작하도록 execCommand 사용)
 function copyMonthStartText() {
