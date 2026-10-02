@@ -2,9 +2,15 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="C&A 재무">
 <meta name="theme-color" content="#0D3D6E">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <title>씨앤에이케어 재무관리</title>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -222,6 +228,59 @@ tbody tr:hover td{background:var(--PU)}
   .ph{margin-bottom:11px}.ph-t{font-size:16px}
   .fgrid{grid-template-columns:1fr}.fg.full{grid-column:1}
 }
+/* ═══ 모바일 최적화 (PWA) ═══ */
+.tb-menu{display:none}
+.drawer-bd{display:none}
+@media(max-width:860px){
+  .layout{flex-direction:column}
+  .topbar{height:calc(var(--tbh) + env(safe-area-inset-top));padding:env(safe-area-inset-top) 10px 0;gap:8px}
+  .topbar>div:first-child{flex:1;min-width:0}
+  .tb-menu{display:flex}
+  /* 사이드바 → 좌측 슬라이드 메뉴 */
+  .sidebar{display:flex;width:min(82vw,290px);transform:translateX(-102%);transition:transform .22s ease;z-index:460;padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom);box-shadow:var(--sh3)}
+  .sidebar.open{transform:none}
+  .sidebar .sb-i{padding:11px 14px 11px 28px;font-size:14px}
+  .sidebar .sb-gl{padding:12px 14px;font-size:13px}
+  .sidebar .sb-children.open{max-height:400px}
+  .drawer-bd{display:block;position:fixed;inset:0;z-index:450;background:rgba(0,0,0,.42);opacity:0;pointer-events:none;transition:opacity .2s}
+  .drawer-bd.open{opacity:1;pointer-events:auto}
+  body.drawer-open{overflow:hidden}
+  /* 하단 탭바 / FAB 안전영역 */
+  .botnav{height:calc(var(--bbh) + env(safe-area-inset-bottom));padding-bottom:env(safe-area-inset-bottom)}
+  .main-wrap{padding-bottom:calc(var(--bbh) + env(safe-area-inset-bottom) + 8px)}
+  .fab{bottom:calc(var(--bbh) + env(safe-area-inset-bottom) + 12px)}
+  .bn-i{font-size:10px}
+  /* 카드형 목록이 없는 표는 숨기지 않고 가로 스크롤 */
+  .tw.mh{display:none}
+  .tw{display:block}
+  .tw table{min-width:520px}
+  /* 페이지 우측 버튼 영역: 꼭 필요한 곳만 표시 */
+  .ab.m-show{display:flex}
+  .ph-s{font-size:11.5px}
+  /* 모달: 하단 시트 + 안전영역 */
+  .mbox{max-height:90vh;padding-bottom:calc(17px + env(safe-area-inset-bottom))}
+  .mft{position:sticky;bottom:calc(-17px - env(safe-area-inset-bottom));background:var(--sf);padding-bottom:4px;flex-wrap:wrap}
+  .twr{top:calc(env(safe-area-inset-top) + 8px);right:10px;left:10px;align-items:flex-end}
+  /* 재무제표 */
+  .fs-filter{padding:10px 11px;gap:8px}
+  .fs-wrap{padding:12px 10px}
+  .fs-header{flex-direction:column;gap:8px}
+  .fs-main-title{font-size:18px}
+  .fs-stamp{text-align:left;width:100%}
+  .fs-stamp-table{display:none}
+  .fs-tbl{font-size:12px}
+  .fs-tbl th,.fs-tbl td{padding:5px 7px}
+  .fs-tbl .fs-item td{padding-left:14px;font-size:11.5px}
+  .fs-tbl td:first-child{word-break:keep-all;min-width:96px}
+  .fs-tbl th:last-child{width:auto!important}
+  .fs-tbl td:last-child{white-space:nowrap}
+  .fs-tbl td:nth-child(2):not(:last-child){font-size:10.5px;word-break:keep-all}
+  .fs-section{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .fs-summary-grid{grid-template-columns:1fr 1fr}
+}
+@media(max-width:860px) and (display-mode:standalone){
+  #app-update-banner{padding-top:calc(env(safe-area-inset-top) + 10px)!important}
+}
 @media print{
   .sidebar,.topbar,.botnav,.fab,.ab,.fb .btn,.txc-ac,.mo{display:none!important}
   .main-wrap{margin-left:0}.card{box-shadow:none;border:1px solid #ccc}
@@ -373,6 +432,7 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
  
 <!-- MOBILE TOPBAR -->
 <header class="topbar">
+  <button class="tb-btn tb-menu" onclick="openDrawer()" aria-label="전체 메뉴">☰</button>
   <div style="display:flex;align-items:center;gap:8px">
     <div><div class="tb-logo">씨앤에이케어</div><div class="tb-sub">재무관리 시스템</div></div>
     <span id="fs-dot-m" style="width:8px;height:8px;border-radius:50%;background:#999;transition:background .3s"></span>
@@ -390,7 +450,7 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
       <div class="ph-t">대시보드</div>
       <div class="ph-s">씨앤에이케어 재무관리 통합장부</div>
     </div>
-    <div class="ab" style="align-items:center;gap:8px">
+    <div class="ab m-show" style="align-items:center;gap:8px">
       <span style="font-size:12.5px;color:var(--t3)">조회 연도</span>
       <select class="fs" id="db-year" onchange="renderDashboard()" style="width:82px;font-weight:600">
         <option>2026</option><option>2025</option><option>2024</option>
@@ -503,7 +563,7 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
       <select class="fs" id="lf-ac" onchange="renderL()" style="width:126px"><option value="">계정과목 전체</option></select>
       <input class="fi" id="lf-q" placeholder="내용 검색..." oninput="renderL()">
     </div>
-    <div class="tw"><table style="table-layout:fixed;width:100%"><thead><tr><th style="width:84px">거래일자</th><th style="width:46px">구분</th><th>내용/적요</th><th style="width:106px;text-align:right">출금(원)</th><th style="width:106px;text-align:right">입금(원)</th><th style="width:106px;text-align:right">잔액(원)</th><th style="width:126px">계정과목</th><th style="width:86px">계좌</th><th style="width:52px;text-align:center">관리</th></tr></thead><tbody id="ltb"></tbody><tfoot id="ltfoot"></tfoot></table></div>
+    <div class="tw mh"><table style="table-layout:fixed;width:100%"><thead><tr><th style="width:84px">거래일자</th><th style="width:46px">구분</th><th>내용/적요</th><th style="width:106px;text-align:right">출금(원)</th><th style="width:106px;text-align:right">입금(원)</th><th style="width:106px;text-align:right">잔액(원)</th><th style="width:126px">계정과목</th><th style="width:86px">계좌</th><th style="width:52px;text-align:center">관리</th></tr></thead><tbody id="ltb"></tbody><tfoot id="ltfoot"></tfoot></table></div>
     <div class="txl" id="lcards"></div>
     <div class="empty" id="lempty" style="display:none"><span class="empty-ic">📭</span><div class="empty-t">거래내역이 없습니다</div><div class="empty-s">파일을 가져오거나 직접 입력해주세요</div></div>
     <div id="lmob" style="padding:9px 12px;border-top:1px solid var(--bd);display:none"><div style="display:flex;gap:7px"><button class="btn sm" style="flex:1" onclick="openMo('mo-bank-up')">📁 가져오기</button><button class="btn sm" style="flex:1" onclick="expL('csv')">CSV↓</button><button class="btn sm p" style="flex:1" onclick="expL('xl')">엑셀↓</button></div></div>
@@ -528,7 +588,7 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
       <select class="fs" id="tsf-st" onchange="renderT('sale')" style="width:92px"><option value="">수금 전체</option><option value="완료">수금완료</option><option value="미완료">미수금</option></select>
       <input class="fi" id="tsf-q" placeholder="거래처 / 품목..." oninput="renderT('sale')">
     </div>
-    <div class="tw"><table><thead><tr><th style="width:84px">작성일자</th><th>거래처명</th><th>품목</th><th style="width:106px;text-align:right">공급가액</th><th style="width:110px;text-align:right">합계금액</th><th style="width:126px">계정과목</th><th style="width:68px;text-align:center">수금</th><th style="width:52px;text-align:center">관리</th></tr></thead><tbody id="ttb-sale"></tbody></table></div>
+    <div class="tw mh"><table><thead><tr><th style="width:84px">작성일자</th><th>거래처명</th><th>품목</th><th style="width:106px;text-align:right">공급가액</th><th style="width:110px;text-align:right">합계금액</th><th style="width:126px">계정과목</th><th style="width:68px;text-align:center">수금</th><th style="width:52px;text-align:center">관리</th></tr></thead><tbody id="ttb-sale"></tbody></table></div>
     <div class="txl" id="tcards-sale"></div>
     <div class="empty" id="tempty-sale" style="display:none"><span class="empty-ic">📤</span><div class="empty-t">매출 계산서가 없습니다</div></div>
   </div>
@@ -545,7 +605,7 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
       <select class="fs" id="tbtf-st" onchange="renderT('buy-tax')" style="width:92px"><option value="">지급 전체</option><option value="완료">지급완료</option><option value="미완료">미지급</option></select>
       <input class="fi" id="tbtf-q" placeholder="거래처 / 품목..." oninput="renderT('buy-tax')">
     </div>
-    <div class="tw"><table><thead><tr><th style="width:84px">작성일자</th><th>거래처명</th><th>품목</th><th style="width:106px;text-align:right">공급가액</th><th style="width:80px;text-align:right">세액(10%)</th><th style="width:110px;text-align:right">합계금액</th><th style="width:60px;text-align:center">공제</th><th style="width:126px">계정과목</th><th style="width:68px;text-align:center">지급</th><th style="width:52px;text-align:center">관리</th></tr></thead><tbody id="ttb-buy-tax"></tbody></table></div>
+    <div class="tw mh"><table><thead><tr><th style="width:84px">작성일자</th><th>거래처명</th><th>품목</th><th style="width:106px;text-align:right">공급가액</th><th style="width:80px;text-align:right">세액(10%)</th><th style="width:110px;text-align:right">합계금액</th><th style="width:60px;text-align:center">공제</th><th style="width:126px">계정과목</th><th style="width:68px;text-align:center">지급</th><th style="width:52px;text-align:center">관리</th></tr></thead><tbody id="ttb-buy-tax"></tbody></table></div>
     <div class="txl" id="tcards-buy-tax"></div>
     <div class="empty" id="tempty-buy-tax" style="display:none"><span class="empty-ic">📥</span><div class="empty-t">매입 세금계산서가 없습니다</div></div>
   </div>
@@ -562,7 +622,7 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
       <select class="fs" id="tbef-st" onchange="renderT('buy-ex')" style="width:92px"><option value="">지급 전체</option><option value="완료">지급완료</option><option value="미완료">미지급</option></select>
       <input class="fi" id="tbef-q" placeholder="거래처 / 품목..." oninput="renderT('buy-ex')">
     </div>
-    <div class="tw"><table><thead><tr><th style="width:84px">작성일자</th><th>거래처명</th><th>품목</th><th style="width:106px;text-align:right">공급가액(원)</th><th style="width:110px;text-align:right">합계금액</th><th style="width:126px">계정과목</th><th style="width:68px;text-align:center">지급</th><th style="width:52px;text-align:center">관리</th></tr></thead><tbody id="ttb-buy-ex"></tbody></table></div>
+    <div class="tw mh"><table><thead><tr><th style="width:84px">작성일자</th><th>거래처명</th><th>품목</th><th style="width:106px;text-align:right">공급가액(원)</th><th style="width:110px;text-align:right">합계금액</th><th style="width:126px">계정과목</th><th style="width:68px;text-align:center">지급</th><th style="width:52px;text-align:center">관리</th></tr></thead><tbody id="ttb-buy-ex"></tbody></table></div>
     <div class="txl" id="tcards-buy-ex"></div>
     <div class="empty" id="tempty-buy-ex" style="display:none"><span class="empty-ic">📄</span><div class="empty-t">매입 계산서가 없습니다</div></div>
   </div>
@@ -588,7 +648,7 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
       <select class="fs" id="cf-ac" onchange="renderC()" style="width:122px"><option value="">계정과목 전체</option></select>
       <input class="fi" id="cf-q" placeholder="가맹점 / 품목 검색..." oninput="renderC()">
     </div>
-    <div class="tw"><table><thead><tr>
+    <div class="tw mh"><table><thead><tr>
       <th style="width:84px">사용일자</th>
       <th style="width:72px">결제월</th>
       <th style="width:116px">카드사/카드</th>
@@ -661,7 +721,7 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
       <select class="fs" id="ef-ac" onchange="renderExp()" style="width:126px"><option value="">계정과목 전체</option></select>
       <input class="fi" id="ef-q" placeholder="제목 / 수취인 / 내용 검색..." oninput="renderExp()">
     </div>
-    <div class="tw"><table><thead><tr>
+    <div class="tw mh"><table><thead><tr>
       <th style="width:84px">지급일자</th>
       <th style="width:84px">기안일자</th>
       <th>제목</th>
@@ -702,7 +762,7 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
   </div>
   <div class="stats" id="exp-today-stats"></div>
   <div class="card">
-    <div class="tw"><table><thead><tr>
+    <div class="tw mh"><table><thead><tr>
       <th style="width:84px">지급일자</th>
       <th>제목</th>
       <th>수취인</th>
@@ -977,10 +1037,11 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
 <nav class="botnav">
   <button class="bn-i active" data-p="dashboard" onclick="nav(this)"><span class="bn-ic">🏠</span><span>홈</span><span class="bn-dt"></span></button>
   <button class="bn-i" data-p="ledger" onclick="nav(this)"><span class="bn-ic">⇄</span><span>입출금</span><span class="bn-dt"></span></button>
-  <button class="bn-i" data-p="tax-sale" onclick="nav(this)"><span class="bn-ic">🧾</span><span>세금계산서</span><span class="bn-dt"></span></button>
-  <button class="bn-i" data-p="card" onclick="nav(this)"><span class="bn-ic">💳</span><span>카드</span><span class="bn-dt"></span></button>
-  <button class="bn-i" data-p="set-acct" onclick="nav(this)"><span class="bn-ic">⚙️</span><span>설정</span><span class="bn-dt"></span></button>
+  <button class="bn-i" data-p="exp-req" onclick="nav(this)"><span class="bn-ic">📋</span><span>지출결의</span><span class="bn-dt"></span></button>
+  <button class="bn-i" data-p="fs-report" onclick="nav(this)"><span class="bn-ic">📑</span><span>손익</span><span class="bn-dt"></span></button>
+  <button class="bn-i" id="bn-menu" onclick="openDrawer()"><span class="bn-ic">☰</span><span>전체메뉴</span><span class="bn-dt"></span></button>
 </nav>
+<div class="drawer-bd" id="drawer-bd" onclick="closeDrawer()"></div>
 <button class="fab" onclick="fabAction()">＋</button>
 </div><!-- layout -->
  
@@ -1316,7 +1377,7 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
 <script>
 // ─── 앱 버전 / 새 버전 감지 ───
 // 배포마다 이 값과 저장소 루트의 version.txt를 같은 값으로 올려야 함 (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_02_05';
+const APP_BUILD = '26_10_02_06';
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
     .then(r => r.ok ? r.text() : null)
@@ -1343,6 +1404,10 @@ function showUpdateBanner(remoteVersion) {
 setTimeout(checkForNewVersion, 10000);
 setInterval(checkForNewVersion, 5 * 60 * 1000);
 document.addEventListener('visibilitychange', () => { if(!document.hidden) checkForNewVersion(); });
+// PWA: 서비스워커 등록 (항상 네트워크 우선 — 최신 버전 감지와 충돌 없음)
+if('serviceWorker' in navigator && location.protocol !== 'file:') {
+  window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
+}
 const firebaseConfig = {
   apiKey: "AIzaSyAp4hkcCzchjECghxoWfP7JYH8aJgVpYZk",
   authDomain: "cna-care-29312.firebaseapp.com",
@@ -1766,6 +1831,11 @@ function nav(el) {
   const bn = document.querySelector(`.bn-i[data-p="${pid}"]`);
   if(sb && sb!==el) sb.classList.add('active');
   if(bn && bn!==el) bn.classList.add('active');
+  // 하단 탭에 없는 페이지면 '전체메뉴' 탭 강조 + 슬라이드 메뉴 닫기
+  const bnMenu = document.getElementById('bn-menu');
+  if(bnMenu) bnMenu.classList.toggle('active', !bn);
+  closeDrawer();
+  window.scrollTo(0,0);
   // auto-expand the group containing the active item
   const target = sb || (el.dataset.page ? el : null);
   if(target) {
@@ -1795,6 +1865,19 @@ function nav(el) {
   if(cmob) cmob.style.display=(pid==='card'&&isMob())?'block':'none';
 }
  
+/* ═══════ 모바일 슬라이드 메뉴 ═══════ */
+function openDrawer() {
+  document.querySelector('.sidebar').classList.add('open');
+  document.getElementById('drawer-bd').classList.add('open');
+  document.body.classList.add('drawer-open');
+}
+function closeDrawer() {
+  const sbEl = document.querySelector('.sidebar'), bd = document.getElementById('drawer-bd');
+  if(sbEl) sbEl.classList.remove('open');
+  if(bd) bd.classList.remove('open');
+  document.body.classList.remove('drawer-open');
+}
+
 /* ═══════ MODAL ═══════ */
 function openMo(id) { document.getElementById(id).classList.add('open'); }
 function closeMo(id) {
