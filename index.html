@@ -871,6 +871,7 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
             <th>적요/내용</th>
             <th style="width:110px;text-align:right">금액(원)</th>
             <th style="width:80px">비고</th>
+            <th style="width:44px;text-align:center">수정</th>
           </tr></thead>
           <tbody id="drill-tbody"></tbody>
           <tfoot id="drill-tfoot"></tfoot>
@@ -1315,7 +1316,7 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
 <script>
 // ─── 앱 버전 / 새 버전 감지 ───
 // 배포마다 이 값과 저장소 루트의 version.txt를 같은 값으로 올려야 함 (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_02_03';
+const APP_BUILD = '26_10_02_04';
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
     .then(r => r.ok ? r.text() : null)
@@ -1465,12 +1466,16 @@ function buildCareBook() {
   const feeReqs = expReqs.filter(t => isCareReq(t) && t.status === '지급완료' && t.payDate);
   return { reqById, careLedIds, depSplit, feeReqs };
 }
-/* 입출금내역 계정 표시용 — 간병 지급건과 연동된 출금은 저장값('급여')은 그대로 두고 '간병비선지급'으로만 표시
+/* 입출금내역 계정 표시용 — 저장값은 그대로 두고 화면 표시만 바꾼다
+   · 간병 지급건과 연동된 출금('급여') → '간병비선지급'
+   · 업체 입금('매출액') → '간병비회수'
    (판정 기준은 buildCareBook의 careLedIds와 동일) */
 const CARE_LED_LABEL = '간병비선지급';
+const CARE_IN_LABEL  = '간병비회수';   // 업체 입금('매출액' 계정) 표시명 — 간병비 회수분+수수료가 섞인 입금
 function careReqIdSet() { return new Set(expReqs.filter(isCareReq).map(t => String(t.id))); }
 function ledAcctLabel(t, careSet) {
   if(t && t.type === 'expense' && t.linkedExpId && (careSet || careReqIdSet()).has(String(t.linkedExpId))) return CARE_LED_LABEL;
+  if(t && t.type === 'income' && FS_SALE_ACCTS.includes(t.acct)) return CARE_IN_LABEL;
   return (t && t.acct) || '미분류';
 }
 function isCareLedger(l, cb) { return !!l && cb.careLedIds.has(String(l.id)); }
@@ -2184,6 +2189,7 @@ function saveL() {
   applyBalanceRecalc(changedIds);
 
   closeMo('mo-l-add'); renderL(); updBadges(); updSbDate();
+  refreshDrillAfterEdit();
 }
 function delL(id) {
   const item = ledger.find(t=>t.id==id);
@@ -2209,7 +2215,7 @@ function delL(id) {
   // 삭제 후 이후 모든 거래 잔액 연쇄 재계산
   applyBalanceRecalc(null);
 
-  renderL(); updBadges();
+  renderL(); updBadges(); refreshDrillAfterEdit();
   if(!item || !item.linkedExpId) toast('삭제되었습니다.');
 }
 function openLAcct(id) {
@@ -2224,6 +2230,7 @@ function applyLAcct() {
   const t=ledger.find(x=>x.id==editLAId);
   if(t){ t.acct=document.getElementById('la-sel').value; fsSet(COL.ledger,t.id,t); }
   closeMo('mo-l-acct'); renderL(); toast('계정과목이 변경되었습니다.','ok');
+  refreshDrillAfterEdit();
 }
 function openLView(id) {
   const t=ledger.find(x=>x.id==id); if(!t) return;
@@ -5226,7 +5233,7 @@ function getDrillRows(key, start, end) {
     }));
     if(acct === 'ALL' || acct === 'direct') pl.feeDirectRows.forEach(t => rows.push({
       date: t.date, acct: t.acct, partner: t.partner || t.bank || '', desc: t.desc || '',
-      amount: Number(t.amount||0), note: '직접 입금'
+      amount: Number(t.amount||0), note: '직접 입금', ledId: t.id
     }));
 
   } else if(src === 'bs') {
@@ -5236,11 +5243,11 @@ function getDrillRows(key, start, end) {
     if(acct === 'advance') {
       ledger.filter(l => upTo(l.date) && isCareLedger(l, cb)).forEach(l => rows.push({
         date: l.date, acct: '간병비 선지급', partner: l.partner || l.bank || '', desc: l.desc || '',
-        amount: Number(l.amount||0), note: '(+) 대지급'
+        amount: Number(l.amount||0), note: '(+) 대지급', ledId: l.id
       }));
       cb.depSplit.filter(x => upTo(x.date) && x.care).forEach(x => rows.push({
         date: x.date, acct: '간병비 회수', partner: x.row.partner || x.row.bank || '', desc: x.row.desc || '',
-        amount: -x.care, note: `(−) 입금 ${Number(x.amt).toLocaleString('ko-KR')}원 중 간병비 몫`
+        amount: -x.care, note: `(−) 입금 ${Number(x.amt).toLocaleString('ko-KR')}원 중 간병비 몫`, ledId: x.row.id
       }));
     } else if(acct === 'feeAR') {
       cb.feeReqs.filter(t => upTo(t.payDate)).forEach(t => rows.push({
@@ -5249,17 +5256,17 @@ function getDrillRows(key, start, end) {
       }));
       cb.depSplit.filter(x => upTo(x.date) && x.fee).forEach(x => rows.push({
         date: x.date, acct: '수수료 입금', partner: x.row.partner || x.row.bank || '', desc: x.row.desc || '',
-        amount: -x.fee, note: `(−) 입금 ${Number(x.amt).toLocaleString('ko-KR')}원 중 수수료 몫`
+        amount: -x.fee, note: `(−) 입금 ${Number(x.amt).toLocaleString('ko-KR')}원 중 수수료 몫`, ledId: x.row.id
       }));
     } else if(acct === 'suspense') {
       cb.depSplit.filter(x => upTo(x.date) && x.unalloc).forEach(x => rows.push({
         date: x.date, acct: '가수금', partner: x.row.partner || x.row.bank || '', desc: x.row.desc || '',
-        amount: x.unalloc, note: x.parts.length ? '예상매출 초과분' : '지급건 매칭 안 됨'
+        amount: x.unalloc, note: x.parts.length ? '예상매출 초과분' : '지급건 매칭 안 됨', ledId: x.row.id
       }));
     } else if(acct === 'draw') {
       ledger.filter(t => t.type==='expense' && FS_DRAW_ACCTS.includes(t.acct) && upTo(t.date)).forEach(t => rows.push({
         date: t.date, acct: t.acct, partner: t.partner || t.bank || '', desc: t.desc || '',
-        amount: Number(t.amount||0), note: '대표자 인출'
+        amount: Number(t.amount||0), note: '대표자 인출', ledId: t.id
       }));
     }
 
@@ -5277,7 +5284,7 @@ function getDrillRows(key, start, end) {
       .forEach(t => rows.push({
         date: t.date, acct: t.acct||'',
         partner: t.partner || t.bank||'', desc: t.desc||'',
-        amount: Number(t.amount||0), note: t.note||''
+        amount: Number(t.amount||0), note: t.note||'', ledId: t.id
       }));
 
   } else if(src === 'ledger_exp') {
@@ -5298,7 +5305,7 @@ function getDrillRows(key, start, end) {
       .forEach(t => rows.push({
         date: t.date, acct: t.acct||'',
         partner: t.partner || t.bank||'', desc: t.desc||'',
-        amount: Number(t.amount||0), note: t.note||''
+        amount: Number(t.amount||0), note: t.note||'', ledId: t.id
       }));
 
   } else if(src === 'ledger') {
@@ -5308,7 +5315,7 @@ function getDrillRows(key, start, end) {
       .forEach(t => rows.push({
         date: t.date, acct: t.acct||'',
         partner: t.partner || t.bank||'', desc: t.desc||'',
-        amount: Number(t.amount||0), note: t.note||''
+        amount: Number(t.amount||0), note: t.note||'', ledId: t.id
       }));
 
   } else if(src === 'expReq') {
@@ -5363,17 +5370,35 @@ function getDrillRows(key, start, end) {
 
 
 
+let _drillArgs = null;   // 마지막으로 연 드릴다운 {key, label, prefix} — 전표 수정 후 다시 그릴 때 사용
+/* 드릴다운 행 수정 버튼 — 입출금 원본이 있는 행만 (지출결의서·세금계산서 기반 행은 해당 메뉴에서 수정) */
+function drillEditBtn(r) {
+  if(r.ledId === undefined || r.ledId === null || !ledger.some(x => x.id == r.ledId)) return '';
+  const arg = typeof r.ledId === 'number' ? r.ledId : `'${String(r.ledId).replace(/'/g, "\\'")}'`;
+  return `<button class="btn sm ic" title="이 전표 수정" onclick="openLAdd(${arg})">✏</button>`;
+}
+/* 입출금 전표 수정·삭제 후 호출 — 드릴다운이 열려 있으면 재무제표를 다시 계산하고 팝업도 새 값으로 다시 연다 */
+function refreshDrillAfterEdit() {
+  const mo = document.getElementById('mo-fs-drill');
+  if(!_drillArgs || !mo || !mo.classList.contains('open')) return;
+  const { key, label, prefix } = _drillArgs;
+  renderFS(prefix);
+  // 다시 그려진 재무제표에서 같은 항목의 새 합계를 찾음 (0원이 되면 링크가 사라지므로 0)
+  let expected = 0;
+  const esc = key.replace(/'/g,"\\'").replace(/"/g,'&quot;');
+  document.querySelectorAll(`#${prefix}-report-body .fs-drill`).forEach(el => {
+    const oc = el.getAttribute('onclick') || '';
+    if(oc.startsWith(`openDrill('${esc}',`)) { const m = oc.match(/,(-?\d+)\)$/); if(m) expected = Number(m[1]); }
+  });
+  openDrill(key, label, expected);
+}
 function openDrill(key, label, expectedTotal) {
   // 현재 활성 재무제표 페이지의 기간 파악
   const active = document.querySelector('.page.active');
   const prefix = active ? active.id.replace('p-','').replace('-report','') : 'fs';
-  const yr   = document.getElementById(`${prefix}-year`)?.value || '2026';
-  const from = document.getElementById(`${prefix}-from`)?.value || '01';
-  const to   = document.getElementById(`${prefix}-to`)?.value   || '12';
-  const start = `${yr}-${from}-01`;
-  const endDay2 = new Date(parseInt(yr), parseInt(to), 0).getDate();
-  const end   = `${yr}-${to}-${String(endDay2).padStart(2,'0')}`;
-  const period = `${yr}년 ${parseInt(from)}월 ~ ${parseInt(to)}월`;
+  // 손익계산서와 같은 기간(월별·연도별·일별 탭 반영) — 예전엔 탭과 무관하게 월 선택값을 써서 불일치가 났음
+  const { start, end, label: period } = fsPeriod(prefix);
+  _drillArgs = { key, label, prefix };
 
   // 모달 열기 + 로딩
   document.getElementById('drill-title').textContent    = label;
@@ -5400,7 +5425,7 @@ function openDrill(key, label, expectedTotal) {
     // 테이블 렌더
     const tbody = document.getElementById('drill-tbody');
     if(!rows.length) {
-      tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--tm)">해당 기간 내 데이터가 없습니다</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--tm)">해당 기간 내 데이터가 없습니다</td></tr>`;
     } else {
       tbody.innerHTML = rows.map((r,i) => `<tr>
         <td style="text-align:center;font-size:11px;color:var(--t3)">${i+1}</td>
@@ -5410,6 +5435,7 @@ function openDrill(key, label, expectedTotal) {
         <td style="font-size:12px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.desc||'-'}</td>
         <td class="nm" style="font-family:'JetBrains Mono',monospace;font-size:12.5px">${r.amount.toLocaleString('ko-KR')}</td>
         <td style="font-size:11px;color:var(--t3)">${r.note||''}</td>
+        <td style="text-align:center">${drillEditBtn(r)}</td>
       </tr>`).join('');
     }
 
@@ -5419,6 +5445,7 @@ function openDrill(key, label, expectedTotal) {
         <td colspan="5" style="text-align:right;padding:8px 10px">합계</td>
         <td class="nm" style="font-family:'JetBrains Mono',monospace;padding:8px 10px;${mismatch?'color:var(--R)':''}">${total.toLocaleString('ko-KR')}</td>
         <td style="font-size:11px;color:${mismatch?'var(--R)':'var(--G)'}">${mismatch?'⚠ 불일치':'✓'}</td>
+        <td></td>
       </tr>`;
 
     document.getElementById('drill-loading').style.display = 'none';
@@ -5519,7 +5546,8 @@ function fsHeader(title, sub, period) {
 }
 
 /* ── 공통 데이터 계산 ── */
-function calcFSData(prefix) {
+/* 재무제표 조회 기간 — calcFSData와 드릴다운(openDrill)이 반드시 같은 기간을 쓰도록 단일화 */
+function fsPeriod(prefix) {
   const yr  = document.getElementById(`${prefix}-year`)?.value || '2026';
 
   let start, end, label, mo1 = '', mo2 = '';
@@ -5543,6 +5571,10 @@ function calcFSData(prefix) {
       ? (mo1===mo2 ? `${yr}년 ${parseInt(mo1)}월` : `${yr}년 ${parseInt(mo1)}~${parseInt(mo2)}월`)
       : `${yr}년 (연간)`;
   }
+  return { yr, start, end, label, mo1, mo2 };
+}
+function calcFSData(prefix) {
+  const { yr, start, end, label, mo1, mo2 } = fsPeriod(prefix);
 
   /* ══════════════════════════════════════
      단일 소스: 입출금 내역(ledger) + 지출결의서 간병 지급건
