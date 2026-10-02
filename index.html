@@ -1316,7 +1316,7 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
 <script>
 // ─── 앱 버전 / 새 버전 감지 ───
 // 배포마다 이 값과 저장소 루트의 version.txt를 같은 값으로 올려야 함 (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_02_04';
+const APP_BUILD = '26_10_02_05';
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
     .then(r => r.ok ? r.text() : null)
@@ -1401,6 +1401,8 @@ const REQUIRED_ACCTS = [
   {name:'외주용역비',type:'expense',color:'ab3'},   // 프리랜서 직원 보수(3.3%) 전용
   {name:'인출금',type:'expense',color:'ab6'},       // 대표자 인출 — 비용 아님(자본 차감)
   {name:'수수료수입',type:'income',color:'ab1'},    // 간병비 없이 수수료만 들어온 입금
+  {name:'간병비선지급',type:'expense',color:'ab0'},  // 간병인에게 먼저 준 간병비 — 비용 아님(대지급금)
+  {name:'간병비회수',type:'income',color:'ab1'},     // 업체 입금(간병비+수수료) — 매출 아님(대지급금 회수)
 ];
 /* ══════════════════════════════════════
    재무제표 계정 분류 기준 (단일 소스)
@@ -1410,7 +1412,10 @@ const REQUIRED_ACCTS = [
 ══════════════════════════════════════ */
 // ※ '매출액' 계정 = 업체 입금(간병비 대지급 상환분 + 수수료). 2026-10부터 이 입금 전체를 매출로 보지 않고
 //    외상매출금 매칭 결과로 간병비 몫(대지급금 회수)과 수수료 몫(미수수수료 회수)으로 나눈다. 매칭 안 된 입금은 가수금.
-const FS_SALE_ACCTS          = ['매출액'];               // 업체 입금(간병비+수수료) 계정
+const FS_SALE_ACCTS          = ['간병비회수','매출액'];   // 업체 입금(간병비+수수료) 계정 — '매출액'은 이전 데이터 호환
+const CARE_PAY_ACCTS         = ['간병비선지급','급여'];   // 지출결의서 간병 지급건 계정 — '급여'는 이전 데이터 호환
+const isCarePayAcct = a => CARE_PAY_ACCTS.includes(a);
+const isCareDepAcct = a => FS_SALE_ACCTS.includes(a);
 const FS_FEE_ACCTS           = ['수수료수입'];           // 수수료만 직접 들어온 입금 — 입금일 기준 수수료수입
 const FS_CAPITAL_ACCTS       = ['보통주자본금'];           // 자본금으로 인식할 계정
 const FS_DRAW_ACCTS          = ['인출금'];               // 대표자 인출 — 판관비 제외, 자본 차감
@@ -1422,13 +1427,15 @@ const CARE_FEE_PER_DAY = 5000;                           // 간병 일당 수수
 
 /* ══════════════════════════════════════
    간병비 대지급 / 수수료 장부 (세무 장부 기준)
-   - 간병 지급건 = 지출결의서 '급여' 중 간병일수 또는 예상매출액이 있는 건
+   - 간병 지급건 = 지출결의서 '간병비선지급' 건 (이전 데이터: '급여' 중 간병일수·예상매출액이 있는 건)
      → 협회 비용이 아니라 업체 대신 먼저 낸 돈(대지급금)
    - 수수료수입은 간병인 지급일(payDate, 지급완료 건) 기준으로 발생 인식
    - 업체 입금은 배분된 지급건의 (간병비 : 수수료) 비율로 나눠 각각 회수 처리
 ══════════════════════════════════════ */
 function isCareReq(t) {
-  return !!t && t.acct === '급여' && (Number(t.expectedRev||0) > 0 || Number(t.careDays||0) > 0);
+  if(!t) return false;
+  if(t.acct === '간병비선지급') return true;          // 간병비선지급 계정은 항상 대지급
+  return t.acct === '급여' && (Number(t.expectedRev||0) > 0 || Number(t.careDays||0) > 0); // 이전 데이터 호환
 }
 function careFeeOf(t) {
   if(!t) return 0;
@@ -1442,7 +1449,8 @@ function buildCareBook() {
   // 간병 지급건과 연결된 출금 = 대지급(비용 아님)
   const careLedIds = new Set();
   ledger.forEach(l => {
-    if(l.type === 'expense' && l.linkedExpId && isCareReq(reqById[String(l.linkedExpId)])) careLedIds.add(String(l.id));
+    if(l.type !== 'expense') return;
+    if(l.acct === CARE_LED_LABEL || (l.linkedExpId && isCareReq(reqById[String(l.linkedExpId)]))) careLedIds.add(String(l.id));
   });
   // 업체 입금 분할
   const { depAlloc } = allocateARDeposits();
@@ -1467,14 +1475,14 @@ function buildCareBook() {
   return { reqById, careLedIds, depSplit, feeReqs };
 }
 /* 입출금내역 계정 표시용 — 저장값은 그대로 두고 화면 표시만 바꾼다
-   · 간병 지급건과 연동된 출금('급여') → '간병비선지급'
-   · 업체 입금('매출액') → '간병비회수'
+   · 간병 지급건과 연동된 출금(이전 '급여') 또는 계정이 '간병비선지급'인 출금 → '간병비선지급'
+   · 업체 입금('간병비회수' 또는 이전 '매출액') → '간병비회수'
    (판정 기준은 buildCareBook의 careLedIds와 동일) */
 const CARE_LED_LABEL = '간병비선지급';
 const CARE_IN_LABEL  = '간병비회수';   // 업체 입금('매출액' 계정) 표시명 — 간병비 회수분+수수료가 섞인 입금
 function careReqIdSet() { return new Set(expReqs.filter(isCareReq).map(t => String(t.id))); }
 function ledAcctLabel(t, careSet) {
-  if(t && t.type === 'expense' && t.linkedExpId && (careSet || careReqIdSet()).has(String(t.linkedExpId))) return CARE_LED_LABEL;
+  if(t && t.type === 'expense' && (t.acct === CARE_LED_LABEL || (t.linkedExpId && (careSet || careReqIdSet()).has(String(t.linkedExpId))))) return CARE_LED_LABEL;
   if(t && t.type === 'income' && FS_SALE_ACCTS.includes(t.acct)) return CARE_IN_LABEL;
   return (t && t.acct) || '미분류';
 }
@@ -1657,6 +1665,19 @@ async function initApp() {
       if(stAccts) fsSet(COL.settings,'accts',{_type:'accts',data:accts});
     }
     if(stRules && stRules.data) rules = stRules.data;
+    // 지출결의서 '급여' → '간병비선지급' 1회 변환 (연동된 입출금 출금도 같이) — 이후 새로 쓰는 '급여'는 건드리지 않음
+    const stMig = stSnap.find(d=>d._type==='migrations') || {_type:'migrations'};
+    if(!stMig.wageToCareAdv) {
+      const conv = expReqs.filter(t => t.acct === '급여');
+      const convIds = new Set(conv.map(t => String(t.id)));
+      conv.forEach(t => { t.acct = '간병비선지급'; fsSet(COL.expReqs, t.id, t); });
+      const convLed = ledger.filter(l => l.type === 'expense' && l.acct === '급여' && l.linkedExpId && convIds.has(String(l.linkedExpId)));
+      convLed.forEach(l => { l.acct = '간병비선지급'; fsSet(COL.ledger, l.id, l); });
+      stMig.wageToCareAdv = new Date().toISOString();
+      stMig.wageToCareAdvCount = { expReqs: conv.length, ledger: convLed.length };
+      fsSet(COL.settings, 'migrations', stMig);
+      if(conv.length) setTimeout(() => toast(`지출결의서 급여 ${conv.length}건 → 간병비선지급으로 변경 완료`, 'ok'), 800);
+    }
     if(stSys) {
       const s = stSys;
       const el = id => document.getElementById(id);
@@ -2071,7 +2092,7 @@ function recalcExpLedgerBalance() {
 function onLedgerAcctChange() {
   const acct = document.getElementById('lf-acct').value;
   const wrap = document.getElementById('lf-partner-wrap');
-  if(wrap) wrap.style.display = acct === '매출액' ? '' : 'none';
+  if(wrap) wrap.style.display = isCareDepAcct(acct) ? '' : 'none';
 }
 
 function openLAdd(id) {
@@ -2091,7 +2112,7 @@ function openLAdd(id) {
   const partnerEl = document.getElementById('lf-partner');
   const partnerWrap = document.getElementById('lf-partner-wrap');
   if(partnerEl) partnerEl.value = t?.partner || '';
-  if(partnerWrap) partnerWrap.style.display = (t?.acct === '매출액') ? '' : 'none';
+  if(partnerWrap) partnerWrap.style.display = isCareDepAcct(t?.acct) ? '' : 'none';
 
   const hint  = document.getElementById('lf-balance-hint');
   const label = document.getElementById('lf-balance-label');
@@ -2159,7 +2180,7 @@ function saveL() {
         desc=document.getElementById('lf-desc').value.trim();
   if(!date||!amount||!desc){ toast('날짜, 금액, 내용은 필수입니다.','err'); return; }
   const acct = document.getElementById('lf-acct').value||autoClassify(desc);
-  const partner = (acct === '매출액') ? (document.getElementById('lf-partner')?.value||'') : '';
+  const partner = isCareDepAcct(acct) ? (document.getElementById('lf-partner')?.value||'') : '';
   const obj={date,type:document.getElementById('lf-iotype').value,amount,
     balance:parseFloat(document.getElementById('lf-balance').value)||0,
     desc, acct,
@@ -3309,7 +3330,7 @@ const expStatusClass = {대기:'est-wait',승인:'est-ok',지급완료:'est-paid
 function onExpAcctChange() {
   const acct = document.getElementById('ef-acct').value;
   const sec  = document.getElementById('ef-rev-section');
-  if(acct === '급여') {
+  if(isCarePayAcct(acct)) {
     sec.style.display = '';
     calcExpectedRev();
   } else {
@@ -3376,7 +3397,7 @@ function openExpAdd(id) {
   document.getElementById('ef-acct').value = t ? t.acct : '';
   // 급여 계정이면 섹션 표시
   const sec = document.getElementById('ef-rev-section');
-  if(sec) sec.style.display = (t?.acct==='급여') ? '' : 'none';
+  if(sec) sec.style.display = isCarePayAcct(t?.acct) ? '' : 'none';
   openMo('mo-exp-add');
 }
 
@@ -3412,7 +3433,7 @@ function openExpCopy(id) {
   document.getElementById('ef-acct').value = t.acct || '';
   calcExpectedRev(); // 복사된 금액·간병일수 기준으로 예상매출액을 즉시 재계산 (고정 방지)
   const sec = document.getElementById('ef-rev-section');
-  if(sec) sec.style.display = (t.acct==='급여') ? '' : 'none';
+  if(sec) sec.style.display = isCarePayAcct(t.acct) ? '' : 'none';
   openMo('mo-exp-add');
 }
 
@@ -3428,7 +3449,7 @@ function saveExp() {
   }
   const acct = document.getElementById('ef-acct').value||autoClassify(title+' '+payee);
   // 급여 계정일 때 외상매출금 저장
-  const isWage     = acct === '급여';
+  const isWage     = isCarePayAcct(acct);
   const careDays   = isWage ? parseFloat(document.getElementById('ef-care-days')?.value)||0 : 0;
   const expectedRev= isWage ? parseFloat(document.getElementById('ef-expected-rev')?.value)||0 : 0;
   const client     = isWage ? (document.getElementById('ef-client')?.value||'') : '';
@@ -3567,7 +3588,7 @@ function openExpView(id) {
       <div class="ev-row"><span class="ev-label">계정과목</span><span class="ev-val"><span class="at ${acctColor(t.acct)}">${t.acct||'미분류'}</span></span></div>
       <div class="ev-row"><span class="ev-label">지출내용</span><span class="ev-val" style="white-space:pre-line">${t.desc}</span></div>
       ${t.note?`<div class="ev-row"><span class="ev-label">비고</span><span class="ev-val">${t.note}</span></div>`:''}
-      ${t.acct==='급여' && t.expectedRev ? `
+      ${isCarePayAcct(t.acct) && t.expectedRev ? `
       <div style="margin-top:10px;padding:10px 12px;background:var(--PU);border:1px solid var(--P);border-radius:var(--r2)">
         <div style="font-size:12px;font-weight:700;color:var(--P);margin-bottom:6px">💡 외상매출금 (미수금) 내역</div>
         <div class="ev-row" style="border:none;padding:3px 0"><span class="ev-label" style="width:100px">간병일수</span><span class="ev-val">${t.careDays||'-'}일</span></div>
@@ -3695,8 +3716,8 @@ function extractLedgerNamePair(desc) {
 }
 /* 급여 지출건(환자·간병인)과 실입금 매출액을 이름 기준으로 매칭 집계 */
 function computeARMatching() {
-  const payReqs = expReqs.filter(t => t.acct==='급여' && Number(t.expectedRev||0) > 0);
-  const incomeRows = ledger.filter(t => t.type==='income' && t.acct==='매출액');
+  const payReqs = expReqs.filter(t => isCarePayAcct(t.acct) && Number(t.expectedRev||0) > 0);
+  const incomeRows = ledger.filter(t => t.type==='income' && isCareDepAcct(t.acct));
 
   // 그룹 키: 환자명(영문 앞5자)|간병인명(한글 우선). 환자명 인식 실패 건은 건별 고유키로 분리(오합산 방지)
   const groups = {}; // key -> { patient, caregiver, expectedTotal, payCount, payIds:[], receivedTotal, recvCount, recvDates:[], recvRows:[] }
@@ -3776,7 +3797,7 @@ function computeSuspiciousDeposits() {
   const list = [];
 
   // ①② 매칭 자체가 안 되는 입금
-  ledger.filter(t => t.type==='income' && t.acct==='매출액').forEach(t => {
+  ledger.filter(t => t.type==='income' && isCareDepAcct(t.acct)).forEach(t => {
     const pair = extractLedgerNamePair(t.desc);
     if(!pair) {
       list.push(mk(t, '이름매칭실패', '입금 내용에서 환자-간병인 이름 쌍을 추출하지 못했습니다. 지급 대상과 무관한 착오송금일 수 있습니다.', t.amount));
@@ -4291,8 +4312,8 @@ function toggleARYear(y){
 }
 /* 연도별/월별 예상매출액·수수료·실입금 집계 (필터와 무관하게 항상 전체 기간 기준) */
 function computeARYearlyMonthly(){
-  const payAll = expReqs.filter(t => t.acct==='급여' && Number(t.expectedRev||0) > 0);
-  const incAll = ledger.filter(t => t.type==='income' && t.acct==='매출액');
+  const payAll = expReqs.filter(t => isCarePayAcct(t.acct) && Number(t.expectedRev||0) > 0);
+  const incAll = ledger.filter(t => t.type==='income' && isCareDepAcct(t.acct));
   const map = {};
   const ensure = (y,m) => {
     map[y] = map[y] || { months:{}, count:0, pay:0, fee:0, expected:0, received:0 };
@@ -4513,11 +4534,11 @@ function closeARYMDetail() {
 }
 function buildARYMDetailHTML(y, m, metric) {
   const periodLabel = y ? `${y}년${m ? ` ${Number(m)}월` : ''}` : '전체 기간';
-  const payRows = expReqs.filter(t => t.acct === '급여' && Number(t.expectedRev || 0) > 0
+  const payRows = expReqs.filter(t => isCarePayAcct(t.acct) && Number(t.expectedRev || 0) > 0
       && (!y || (t.payDate || '').slice(0, 4) === y)
       && (!m || (t.payDate || '').slice(5, 7) === m))
     .sort((a, b) => b.payDate.localeCompare(a.payDate));
-  const incRows = ledger.filter(t => t.type === 'income' && t.acct === '매출액'
+  const incRows = ledger.filter(t => t.type === 'income' && isCareDepAcct(t.acct)
       && (!y || (t.date || '').slice(0, 4) === y)
       && (!m || (t.date || '').slice(5, 7) === m))
     .sort((a, b) => b.date.localeCompare(a.date));
@@ -4606,8 +4627,8 @@ function buildARYMDetailHTML(y, m, metric) {
 function renderExpAR() {
   ensureARDefaultPeriod();
   // 연도/월 필터 적용: 지급건은 지급일자(payDate), 입금건은 거래일자(date) 기준
-  const payReqsAll = expReqs.filter(t => t.acct==='급여' && Number(t.expectedRev||0) > 0);
-  const incomeAll  = ledger.filter(t => t.type==='income' && t.acct==='매출액');
+  const payReqsAll = expReqs.filter(t => isCarePayAcct(t.acct) && Number(t.expectedRev||0) > 0);
+  const incomeAll  = ledger.filter(t => t.type==='income' && isCareDepAcct(t.acct));
   const yrOpts = [...new Set(payReqsAll.map(t=>(t.payDate||'').slice(0,4)).filter(Boolean))].sort((a,b)=>b.localeCompare(a));
 
   const rows = payReqsAll
@@ -4664,7 +4685,7 @@ function renderExpAR() {
 
 /* 환자·간병인별 입금대조 렌더 (오입금 의심 내역 + 입금 대조표) — 독립 탭 */
 function renderExpMatch() {
-  const payReqsAll = expReqs.filter(t => t.acct==='급여' && Number(t.expectedRev||0) > 0);
+  const payReqsAll = expReqs.filter(t => isCarePayAcct(t.acct) && Number(t.expectedRev||0) > 0);
   const yrOpts = [...new Set(payReqsAll.map(t=>(t.payDate||'').slice(0,4)).filter(Boolean))].sort((a,b)=>b.localeCompare(a));
 
   // 환자·간병인별 입금 대조 "매칭 계산" 자체는 기간 필터와 무관하게 항상 전체 데이터 기준(교차월 매칭 특성상).
@@ -4813,9 +4834,9 @@ function renderExpMatch() {
 
 /* 상세내역(원장) 렌더 — 지출결의서별 예상매출액 내역 + 실 입금 매출액 내역 전체 (기본 접힘), 통합 내보내기 버튼 */
 function renderExpDetail() {
-  const payRows = expReqs.filter(t => t.acct==='급여' && Number(t.expectedRev||0) > 0)
+  const payRows = expReqs.filter(t => isCarePayAcct(t.acct) && Number(t.expectedRev||0) > 0)
     .sort((a,b) => b.payDate.localeCompare(a.payDate));
-  const incomeRows = ledger.filter(t => t.type==='income' && t.acct==='매출액')
+  const incomeRows = ledger.filter(t => t.type==='income' && isCareDepAcct(t.acct))
     .sort((a,b) => b.date.localeCompare(a.date));
   const totalFee = payRows.reduce((s,t) => s+Number(t.careDays||0)*5000, 0);
   const totalPay = payRows.reduce((s,t) => s+Number(t.amount||0), 0);
@@ -5009,9 +5030,9 @@ function expExp(fmt2) {
 /* 외상매출금 현황 내보내기 — 매칭 요약 + 지급내역(우리 협회) + 입금내역(업체) 모두 포함 */
 function arExport(fmt2) {
   const { rows: matchRows, unmatchedPay } = computeARMatching();
-  const payReqs = expReqs.filter(t => t.acct==='급여' && Number(t.expectedRev||0) > 0)
+  const payReqs = expReqs.filter(t => isCarePayAcct(t.acct) && Number(t.expectedRev||0) > 0)
     .sort((a,b) => b.payDate.localeCompare(a.payDate));
-  const incomeRows = ledger.filter(t => t.type==='income' && t.acct==='매출액')
+  const incomeRows = ledger.filter(t => t.type==='income' && isCareDepAcct(t.acct))
     .sort((a,b) => b.date.localeCompare(a.date));
 
   if(!matchRows.length && !payReqs.length && !incomeRows.length){
@@ -5322,15 +5343,15 @@ function getDrillRows(key, start, end) {
     if(acct === 'wage') {
       // 외상매출금 = 급여 지급건 예상매출액 합계 - 입출금 매출액 합계
       const totalExp = expReqs
-        .filter(t => t.acct==='급여' && Number(t.expectedRev||0) > 0)
+        .filter(t => isCarePayAcct(t.acct) && Number(t.expectedRev||0) > 0)
         .reduce((s,t) => s+Number(t.expectedRev||0), 0);
       const totalReceived = ledger
-        .filter(t => t.type==='income' && t.acct==='매출액')
+        .filter(t => t.type==='income' && isCareDepAcct(t.acct))
         .reduce((s,t) => s+Number(t.amount||0), 0);
 
       // 급여 지급건 예상매출액 목록
       expReqs
-        .filter(t => t.acct==='급여' && Number(t.expectedRev||0) > 0)
+        .filter(t => isCarePayAcct(t.acct) && Number(t.expectedRev||0) > 0)
         .forEach(t => rows.push({
           date: t.payDate||t.draftDate, acct: '예상매출액',
           partner: t.client||t.payee||'',
