@@ -902,6 +902,7 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
       <div style="font-size:12.5px;color:var(--t2);margin-bottom:10px">지출결의서에서 자동 생성된 입출금 내역의 잔액이 0으로 표시되는 경우, 아래 버튼으로 일괄 재계산합니다.</div>
       <button class="btn" onclick="recalcExpLedgerBalance()">🔄 지출결의 입출금 잔액 재계산</button>
       <button class="btn" onclick="removeDupLedger()" style="margin-left:8px">🗑 중복 입출금 내역 제거</button>
+      <button class="btn" onclick="fillLedgerBank()" style="margin-left:8px">🏦 계좌 미입력 자동 채우기</button>
     </div>
   </div>
   <div class="card" style="margin-top:12px"><div class="ch"><span class="ct">📊 재무상태표 설정</span></div>
@@ -1314,7 +1315,7 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
 <script>
 // ─── 앱 버전 / 새 버전 감지 ───
 // 배포마다 이 값과 저장소 루트의 version.txt를 같은 값으로 올려야 함 (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_02_02';
+const APP_BUILD = '26_10_02_03';
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
     .then(r => r.ok ? r.text() : null)
@@ -1463,6 +1464,14 @@ function buildCareBook() {
   // 수수료 발생 대상: 지급완료된 간병 지급건
   const feeReqs = expReqs.filter(t => isCareReq(t) && t.status === '지급완료' && t.payDate);
   return { reqById, careLedIds, depSplit, feeReqs };
+}
+/* 입출금내역 계정 표시용 — 간병 지급건과 연동된 출금은 저장값('급여')은 그대로 두고 '간병비선지급'으로만 표시
+   (판정 기준은 buildCareBook의 careLedIds와 동일) */
+const CARE_LED_LABEL = '간병비선지급';
+function careReqIdSet() { return new Set(expReqs.filter(isCareReq).map(t => String(t.id))); }
+function ledAcctLabel(t, careSet) {
+  if(t && t.type === 'expense' && t.linkedExpId && (careSet || careReqIdSet()).has(String(t.linkedExpId))) return CARE_LED_LABEL;
+  return (t && t.acct) || '미분류';
 }
 function isCareLedger(l, cb) { return !!l && cb.careLedIds.has(String(l.id)); }
 /* 판관비 집계 대상 출금인지 (영업외비용·간병비 대지급·대표자 인출 제외) */
@@ -2010,6 +2019,41 @@ function calcAutoBalance(targetDate, targetType, targetAmount, excludeId) {
     : running - Number(targetAmount);
 }
 
+/* 입출금 수정 창 은행계좌 선택 — 등록 계좌 목록에 없는 기존 값(지출결의서 연동 시 들어간 지급 계좌 등)도
+   옵션으로 추가해서, 수정 저장 시 계좌가 빈 값으로 덮어써지지 않게 한다 */
+function setLedgerBankSel(val) {
+  const sel = document.getElementById('lf-bank'); if(!sel) return;
+  sel.querySelectorAll('option[data-extra]').forEach(o => o.remove());
+  if(val && ![...sel.options].some(o => o.value === val)) {
+    const o = document.createElement('option'); o.value = val; o.textContent = val; o.dataset.extra = '1';
+    sel.appendChild(o);
+  }
+  sel.value = val || '';
+}
+/* 지출결의서 → 입출금 자동 반영 시 계좌 표기 (자동 생성·일괄 채우기 공통) */
+function expLedgerBankName(t) {
+  if(t && t.bank) return t.bank + (t.account ? ' ' + String(t.account).slice(-4) : '');
+  return bankAccs[0] ? bankAccs[0].bank + ' ' + bankAccs[0].number.slice(-4) : '';
+}
+/* 시스템 설정 버튼 - 계좌 미입력 입출금 일괄 채우기 (지출결의서 연동 건만, 생성 때와 같은 규칙) */
+function fillLedgerBank() {
+  const blank = ledger.filter(l => !String(l.bank||'').trim());
+  const targets = [];
+  blank.forEach(l => {
+    if(!l.linkedExpId) return;
+    const exp = expReqs.find(x => String(x.id) === String(l.linkedExpId));
+    const name = exp ? expLedgerBankName(exp) : '';
+    if(name) targets.push({ l, name });
+  });
+  const skip = blank.length - targets.length;
+  if(!targets.length) { toast(blank.length ? `채울 수 있는 건이 없습니다. (원본 지출결의서가 없는 미입력 ${skip}건)` : '계좌 미입력 건이 없습니다.', 'ok'); return; }
+  if(!confirm(`계좌 미입력 ${blank.length}건 중 지출결의서 기준으로 ${targets.length}건을 채웁니다.`
+    + (skip ? `\n(원본 지출결의서가 없는 ${skip}건은 그대로 둡니다)` : '') + '\n진행할까요?')) return;
+  targets.forEach(({ l, name }) => { l.bank = name; fsSet(COL.ledger, l.id, l); });
+  renderL();
+  toast(`계좌 ${targets.length}건 채움` + (skip ? ` · 미처리 ${skip}건` : ''), 'ok');
+}
+
 /* 시스템 설정 버튼 - 전체 일괄 재계산 */
 function recalcExpLedgerBalance() {
   applyBalanceRecalc(null);
@@ -2036,7 +2080,7 @@ function openLAdd(id) {
   document.getElementById('lf-note').value    = t ? t.note   : '';
   syncDropdowns();
   document.getElementById('lf-acct').value = t ? t.acct : '';
-  document.getElementById('lf-bank').value = t ? t.bank : '';
+  setLedgerBankSel(t ? t.bank : '');
 
   // 매출처 필드 복원 및 표시
   const partnerEl = document.getElementById('lf-partner');
@@ -2192,7 +2236,7 @@ function openLView(id) {
       <div class="ev-row"><span class="ev-label">거래일자</span><span class="ev-val">${t.date}</span></div>
       <div class="ev-row"><span class="ev-label">금액</span><span class="ev-val" style="font-size:16px;font-weight:700;color:${t.type==='income'?'var(--G)':'var(--R)'}">${t.type==='income'?'+':'-'}₩${fmt(t.amount)}</span></div>
       <div class="ev-row"><span class="ev-label">잔액</span><span class="ev-val">₩${fmt(t.balance)}</span></div>
-      <div class="ev-row"><span class="ev-label">계정과목</span><span class="ev-val"><span class="at ${acctColor(t.acct)}">${t.acct||'미분류'}</span></span></div>
+      <div class="ev-row"><span class="ev-label">계정과목</span><span class="ev-val"><span class="at ${acctColor(t.acct)}">${ledAcctLabel(t)}</span></span></div>
       <div class="ev-row"><span class="ev-label">은행/계좌</span><span class="ev-val">${t.bank||'-'}</span></div>
       ${t.partner?`<div class="ev-row"><span class="ev-label">매출처</span><span class="ev-val">${t.partner}</span></div>`:''}
       ${t.note?`<div class="ev-row"><span class="ev-label">비고</span><span class="ev-val">${t.note}</span></div>`:''}
@@ -2225,6 +2269,7 @@ function renderL() {
   const tb=document.getElementById('ltb'), ca=document.getElementById('lcards'), em=document.getElementById('lempty');
   if(!rows.length){ tb.innerHTML=''; ca.innerHTML=''; em.style.display='block'; renderLStats([]); return; }
   em.style.display='none'; renderLStats(rows);
+  const careSet = careReqIdSet();
   tb.innerHTML=rows.map(t=>{
     const cc=acctColor(t.acct);
     const needsBal = t.linkedExpId && !Number(t.balance);
@@ -2238,7 +2283,7 @@ function renderL() {
       <td class="nm exp">${t.type==='expense'?fmt(t.amount):''}</td>
       <td class="nm inc">${t.type==='income'?fmt(t.amount):''}</td>
       ${balCell}
-      <td><span class="at ${cc}" onclick="event.stopPropagation();openLAcct(${t.id})">${t.acct||'미분류'} ✏</span></td>
+      <td><span class="at ${cc}" onclick="event.stopPropagation();openLAcct(${t.id})">${ledAcctLabel(t, careSet)} ✏</span></td>
       <td style="font-size:11px;color:var(--tm)">${t.bank}</td>
       <td><button class="btn sm ic" onclick="openLAdd(${t.id})">✏</button> <button class="btn sm ic d" onclick="delL(${t.id})">🗑</button></td>
     </tr>`;
@@ -2252,7 +2297,7 @@ function renderL() {
       ${needsBal
         ? `<button class="btn sm" style="color:var(--O);border-color:var(--O);background:var(--OL);font-size:11px;padding:2px 7px" onclick="event.stopPropagation();openLAdd(${t.id})">잔액 입력 ✏</button>`
         : `<span style="font-size:11px;color:var(--tm)">잔액 ${fmt(t.balance)}</span>`}
-      <span class="at ${acctColor(t.acct)}" onclick="event.stopPropagation();openLAcct(${t.id})">${t.acct||'미분류'} ✏</span>
+      <span class="at ${acctColor(t.acct)}" onclick="event.stopPropagation();openLAcct(${t.id})">${ledAcctLabel(t, careSet)} ✏</span>
       <div class="txc-ac" onclick="event.stopPropagation()"><button class="btn sm ic" onclick="openLAdd(${t.id})">✏</button><button class="btn sm ic d" onclick="delL(${t.id})">🗑</button></div>
     </div></div>`;
   }).join('');
@@ -3438,9 +3483,7 @@ function changeExpStatus(id, status) {
       if(alreadyInLedger) {
         toast('이미 입출금 내역에 등록되어 있습니다.', 'ok');
       } else {
-        const bankName = t.bank
-          ? t.bank + (t.account ? ' ' + t.account.slice(-4) : '')
-          : (bankAccs[0] ? bankAccs[0].bank + ' ' + bankAccs[0].number.slice(-4) : '');
+        const bankName = expLedgerBankName(t);
 
         const newLedger = {
           id: nxId++,
