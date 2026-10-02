@@ -1314,7 +1314,7 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
 <script>
 // ─── 앱 버전 / 새 버전 감지 ───
 // 배포마다 이 값과 저장소 루트의 version.txt를 같은 값으로 올려야 함 (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_02_01';
+const APP_BUILD = '26_10_02_02';
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
     .then(r => r.ok ? r.text() : null)
@@ -3851,7 +3851,7 @@ function confirmARRefundLink(expenseId) {
    ══════════════════════════════
    - 환자·간병인 그룹 안에서 지급건(지급일 순)과 입금(입금일 순)을 예상매출액만큼 채움
    - buildCareBook()이 이 결과로 입금을 간병비 몫/수수료 몫/가수금으로 나누고,
-     현재순이익(calcMatchedIncome)은 기간 내 지급건에 배분된 수수료 몫만 "입금 확인 수수료"로 인정
+     현재순이익(calcMatchedIncome)은 발생 수수료로 계산하고, 배분된 수수료 몫은 입금 확인 참고값으로 사용
    - 입금은 "현재 등록된 전체 입출금내역" 기준이라, 늦게 볼수록(입금이 더 들어올수록) 정확해짐 */
 function allocateARDeposits() {
   const { rows } = computeARMatching();
@@ -3882,9 +3882,9 @@ function allocateARDeposits() {
   return { payAlloc, depAlloc };
 }
 function calcMatchedIncome(d) {
-  /* 현재순이익 (입금 확인 수수료 기준)
-     = 기간 내 지급한 간병 건의 수수료 중 실제 입금된 몫(입금일이 기간 뒤여도 반영)
-       + 직접 입금 수수료 − 비용(직원 보수 + 운영 경비)
+  /* 현재순이익 (발생 수수료 기준)
+     = 기간 내 지급한 간병 건의 수수료 전액(입금 여부 무관) + 직접 입금 수수료 − 비용(직원 보수 + 운영 경비)
+     입금 확인 수수료·미입금 수수료는 참고용으로 함께 계산한다.
      간병비는 업체 대신 낸 돈이라 매출·비용 어디에도 넣지 않는다. */
   const pl = (d && d.cb) ? d : calcPL(d.start, d.end);
   const cb = pl.cb;
@@ -3909,13 +3909,14 @@ function calcMatchedIncome(d) {
   });
   const confirmedFee = detail.reduce((s,x)=>s+x.recvFee, 0);
   const pendingFee   = detail.reduce((s,x)=>s+x.pendingFee, 0);
-  const totalRev     = confirmedFee + pl.feeDirect;
+  const accruedFee   = pl.feeAccrued;                 // 발생 수수료 (간병인 지급일 기준) — 2026-10 SOL 요청으로 입금 확인분 대신 사용
+  const totalRev     = accruedFee + pl.feeDirect;
   const totalCost    = pl.taxBuyAmt + pl.totalSGA;   // 비용 = 매입(세금계산서) + 판관비(직원 보수·통신비 등)
   const opProfit     = totalRev - totalCost;
   const netIncome    = opProfit + pl.nonOp;
 
   return {
-    totalRev, confirmedFee, feeDirect: pl.feeDirect, feeLateIn, pendingFee,
+    totalRev, accruedFee, confirmedFee, feeDirect: pl.feeDirect, feeLateIn, pendingFee,
     accruedRev: pl.totalRev, taxBuyAmt: pl.taxBuyAmt,
     sgaMap: pl.sgaMap, totalSGA: pl.totalSGA, totalCost, opProfit, netIncome, nonOp: pl.nonOp,
     originalNetIncome: pl.netIncome, originalOpProfit: pl.opProfit,
@@ -3939,15 +3940,15 @@ function renderCurrentProfit(d) {
   const costRows = Object.entries(m.sgaMap).filter(([k,v])=>v>0 && !['외주용역비','급여','통신비'].includes(k)).sort((a,b)=>b[1]-a[1]);
 
   return `<div class="fs-wrap">
-    ${fsHeader('현재순이익','기간 내 지급한 간병 건의 수수료 중 입금 확인된 금액 − 비용(직원 보수·운영 경비)', d.label)}
+    ${fsHeader('현재순이익','기간 내 지급한 간병 건에서 발생한 수수료 − 비용(직원 보수·운영 경비)', d.label)}
 
     <div class="no-print" style="display:flex;justify-content:flex-end;margin-bottom:10px">
       <button class="btn p" onclick="${(() => { const sm = d.start.slice(0,7), em = d.end.slice(0,7); return sm===em ? `openProfitNotice(${parseInt(sm.slice(0,4))},${parseInt(sm.slice(5,7))})` : 'openProfitNotice()'; })()}">💬 월별 순이익 안내 문자 복사</button>
     </div>
 
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px">
-      <div class="sc"><div class="sc-l">손익계산서 당기순이익 (발생 기준)</div><div class="sc-v" style="color:var(--t2)">${m.originalNetIncome<0?`(₩${fmtRaw(Math.abs(m.originalNetIncome))})`:`₩${fmtRaw(m.originalNetIncome)}`}</div></div>
-      <div class="sc"><div class="sc-l" style="color:var(--O);font-weight:700">미입금 수수료 (제외)</div><div class="sc-v" style="color:var(--O)">₩${fmtRaw(m.pendingFee)}</div></div>
+      <div class="sc"><div class="sc-l">입금 확인 수수료 (참고)</div><div class="sc-v" style="color:var(--t2)">₩${fmtRaw(m.confirmedFee)}</div></div>
+      <div class="sc"><div class="sc-l" style="color:var(--O);font-weight:700">아직 미입금 수수료 (포함됨)</div><div class="sc-v" style="color:var(--O)">₩${fmtRaw(m.pendingFee)}</div></div>
       <div class="sc"><div class="sc-l" style="color:var(--P);font-weight:700">현재순이익</div><div class="sc-v" style="color:var(--P);font-size:18px;font-weight:700">${m.netIncome<0?`(₩${fmtRaw(Math.abs(m.netIncome))})`:`₩${fmtRaw(m.netIncome)}`}</div></div>
     </div>
 
@@ -3957,11 +3958,11 @@ function renderCurrentProfit(d) {
         <thead><tr><th>항목</th><th style="text-align:right;width:150px">금액(원)</th></tr></thead>
         <tbody>
           <tr style="background:#EFF6FF;font-weight:700">
-            <td>수수료 (입금 확인)</td>
+            <td>수수료 (발생)</td>
             <td class="nm" style="color:var(--P)">${fmtRaw(m.totalRev)}</td>
           </tr>
-          <tr><td style="padding-left:20px;font-size:12px;color:var(--t3)">└ 간병 지급건 수수료 입금분</td><td class="nm" style="font-size:12px">${fmtRaw(m.confirmedFee)}</td></tr>
-          ${m.feeLateIn ? `<tr><td style="padding-left:34px;font-size:11.5px;color:var(--t3)">(기간 뒤 입금됐지만 이 기간 지급건 몫 포함)</td><td class="nm" style="font-size:11.5px;color:var(--G)">${fmtRaw(m.feeLateIn)}</td></tr>` : ''}
+          <tr><td style="padding-left:20px;font-size:12px;color:var(--t3)">└ 간병 지급건 수수료</td><td class="nm" style="font-size:12px">${fmtRaw(m.accruedFee)}</td></tr>
+          ${m.pendingFee ? `<tr><td style="padding-left:34px;font-size:11.5px;color:var(--t3)">(이 중 아직 입금 안 된 금액)</td><td class="nm" style="font-size:11.5px;color:var(--O)">${fmtRaw(m.pendingFee)}</td></tr>` : ''}
           ${m.feeDirect ? `<tr><td style="padding-left:20px;font-size:12px;color:var(--t3)">└ 수수료 직접 입금</td><td class="nm" style="font-size:12px">${fmtRaw(m.feeDirect)}</td></tr>` : ''}
           <tr style="background:#FFF7ED;font-weight:700">
             <td>비용 합계</td>
@@ -3983,7 +3984,7 @@ function renderCurrentProfit(d) {
     </div>
 
     <div class="card">
-      <div class="ch"><span class="ct">📋 간병 지급건별 수수료 입금 확인 (${d.label})</span></div>
+      <div class="ch"><span class="ct">📋 간병 지급건별 수수료 발생·입금 현황 (${d.label})</span></div>
       <div class="tw"><table>
         <thead><tr>
           <th style="width:84px">지급일자</th>
@@ -4080,7 +4081,7 @@ function renderMonthStartPopup() {
 }
 /* 월별 순이익 안내 문자 생성 — 월초 팝업과 "월별 순이익 안내 문자" 창이 같은 문구를 사용
    y: 연도, m: 월(1~12). 현재순이익(calcMatchedIncome)과 동일한 기준:
-   그 달 지급한 간병 건의 수수료 중 오늘까지 입금된 몫 − 비용(직원 보수·운영 경비), 미입금 수수료는 제외 */
+   그 달 지급한 간병 건의 발생 수수료 − 비용(직원 보수·운영 경비), 미입금 수수료는 참고로 표시 */
 function buildProfitNoticeText(y, m) {
   const now = new Date();
   const start = `${y}-${String(m).padStart(2,'0')}-01`;
@@ -4096,8 +4097,8 @@ function buildProfitNoticeText(y, m) {
   return [
     `${m}월 순이익은 아래와 같습니다.`,
     fmtWon(r.netIncome),
-    `*${m}월(1일~${lastDay}일) 지급한 간병 건의 수수료 중 ${asOf}까지 입금 확인된 금액에서 비용을 뺀 금액입니다.`,
-    `*아직 입금되지 않은 수수료 ${fmtWon(r.pendingFee)}은 제외했습니다.`,
+    `*${m}월(1일~${lastDay}일) 지급한 간병 건에서 발생한 수수료에서 비용을 뺀 금액입니다.`,
+    `*이 중 ${asOf} 기준 아직 입금되지 않은 수수료는 ${fmtWon(r.pendingFee)}입니다.`,
     ``,
     `상세내역`,
     `수수료 ${fmtWon(r.totalRev)}`,
