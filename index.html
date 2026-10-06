@@ -1377,7 +1377,7 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
 <script>
 // ─── 앱 버전 / 새 버전 감지 ───
 // 배포마다 이 값과 저장소 루트의 version.txt를 같은 값으로 올려야 함 (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_02_06';
+const APP_BUILD = '26_10_06_01';
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
     .then(r => r.ok ? r.text() : null)
@@ -1578,8 +1578,12 @@ function calcPL(start, end, cb) {
   });
   const totalSGA = Object.values(sgaMap).reduce((s,v)=>s+v, 0);
   const opProfit = grossProfit - totalSGA;
-  const otherInc = ledPeriod.filter(t => t.type==='income' && FS_OTHER_INCOME_ACCTS.includes(t.acct))
-    .reduce((s,t)=>s+Number(t.amount||0), 0);
+  // 영업외수익 — 계정별(이자수익·기타수입)로도 나눠 둔다
+  const otherIncMap = {};
+  FS_OTHER_INCOME_ACCTS.forEach(a => { otherIncMap[a] = 0; });
+  ledPeriod.filter(t => t.type==='income' && FS_OTHER_INCOME_ACCTS.includes(t.acct))
+    .forEach(t => { otherIncMap[t.acct] += Number(t.amount||0); });
+  const otherInc = Object.values(otherIncMap).reduce((s,v)=>s+v, 0);
   const interestExp = ledPeriod.filter(t => t.type==='expense' && t.acct==='이자비용')
     .reduce((s,t)=>s+Number(t.amount||0), 0);
   const nonOp = otherInc - interestExp;
@@ -1589,7 +1593,7 @@ function calcPL(start, end, cb) {
   const suspenseIn = cb.depSplit.filter(x => inR(x.date)).reduce((s,x)=>s+x.unalloc, 0);
   return { start, end, feeRows, feeAccrued, feeDirectRows, feeDirect, totalRev,
     taxBuy, taxBuyAmt, cogs: taxBuyAmt, grossProfit, sgaMap, totalSGA, opProfit,
-    otherInc, interestExp, nonOp, netIncome: opProfit + nonOp, careOut, careIn, suspenseIn, cb };
+    otherInc, otherIncMap, interestExp, nonOp, netIncome: opProfit + nonOp, careOut, careIn, suspenseIn, cb };
 }
 /* 공통 자동분류 규칙 */
 let rules = [
@@ -5380,7 +5384,8 @@ function getDrillRows(key, start, end) {
       .filter(t => t.type==='income' && inRange(t.date))
       .filter(t => {
         if(acct === 'ALL') return FS_SALE_ACCTS.includes(t.acct); // 매출액 계정만
-        if(acct === '기타수입' || acct === '이자수익') return t.acct===acct;
+        if(acct === '영업외수익') return FS_OTHER_INCOME_ACCTS.includes(t.acct); // 이자수익+기타수입 전체
+        if(FS_OTHER_INCOME_ACCTS.includes(acct)) return t.acct===acct;
         if(acct === '보통주자본금') return FS_CAPITAL_ACCTS.includes(t.acct);
         if(acct === '단기차입금') return t.acct==='단기차입금';
         return t.acct===acct;
@@ -5689,7 +5694,7 @@ function calcFSData(prefix) {
   const cb = buildCareBook();
   const pl = calcPL(start, end, cb);
   const { feeRows, feeAccrued, feeDirectRows, feeDirect, totalRev, taxBuy, taxBuyAmt, cogs, grossProfit,
-          sgaMap, totalSGA, opProfit, otherInc, interestExp, nonOp, netIncome, careOut, careIn, suspenseIn } = pl;
+          sgaMap, totalSGA, opProfit, otherInc, otherIncMap, interestExp, nonOp, netIncome, careOut, careIn, suspenseIn } = pl;
   const cogsNote = taxBuyAmt > 0 ? '세금계산서 매입 기준' : '해당 기간 매입 없음';
 
   // 세금계산서 매출 (참고용 — 계산서 발행액과 수수료수입 대조)
@@ -5806,7 +5811,7 @@ function calcFSData(prefix) {
     taxSale, taxSaleAmt,
     taxBuy, taxBuyAmt, cogs, grossProfit,
     sgaMap, totalSGA, opProfit,
-    otherInc, interestExp, nonOp, netIncome,
+    otherInc, otherIncMap, interestExp, nonOp, netIncome,
     careOut, careIn, suspenseIn,
     // B/S
     cashBal, arAmt, arTax, arWage, totalAssets,
@@ -5884,7 +5889,7 @@ function renderIS(d, forPrint=false) {
     <div class="fs-section">
       <div class="fs-section-title">Ⅳ. 영업외손익</div>
       <table class="fs-tbl"><thead><tr><th>항목</th><th>비고</th><th style="width:160px">금액(원)</th></tr></thead><tbody>
-        <tr class="fs-item"><td>영업외수익</td><td style="font-size:11px;color:#888">이자수익·기타수입</td><td>${D('ledger_income:기타수입','영업외수익',d.otherInc)}</td></tr>
+        ${FS_OTHER_INCOME_ACCTS.map(a => `<tr class="fs-item"><td>${a}</td><td style="font-size:11px;color:#888">영업외수익</td><td>${D('ledger_income:'+a, a, (d.otherIncMap||{})[a]||0)}</td></tr>`).join('')}
         <tr class="fs-item"><td>영업외비용</td><td style="font-size:11px;color:#888">이자비용</td><td>${D('ledger_exp:이자비용','이자비용',d.interestExp)}</td></tr>
         <tr class="fs-subtotal"><td colspan="2"><b>영업외손익 합계</b></td><td>${fmtFS(d.nonOp)}</td></tr>
       </tbody></table>
@@ -6136,7 +6141,7 @@ function renderTB(d, forPrint=false) {
     { grp:'자본', acct:'인출금',                    side:'debit',  amt:d.bsDraw,      key:'bs:draw',                    note:'대표자 인출 누계 (자본 차감)' },
     // ── 수익 (대변, 당기 발생분 — 마감 전) ──
     { grp:'수익', acct:'수수료수입',  side:'credit', amt:d.totalRev, key:'fee:ALL',                  note:d.label+' 소개 수수료 (지급일 기준)' },
-    { grp:'수익', acct:'영업외수익',  side:'credit', amt:d.otherInc, key:'ledger_income:기타수입',   note:'이자수익·기타수입' },
+    ...FS_OTHER_INCOME_ACCTS.map(a => ({ grp:'수익', acct:a, side:'credit', amt:(d.otherIncMap||{})[a]||0, key:'ledger_income:'+a, note:'영업외수익' })),
     // ── 비용 (차변, 당기 발생분 — 마감 전) ──
     { grp:'비용', acct:'매출원가',    side:'debit', amt:d.cogs,        key:'taxBuy:매입원가',     note:d.cogsNote },
     ...Object.entries(d.sgaMap).map(([k,v]) => ({ grp:'비용', acct:k, side:'debit', amt:v, key:`ledger_exp:${k}`, note:'판관비' })),
