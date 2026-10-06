@@ -872,7 +872,7 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
       <div style="font-size:13px;font-weight:700;color:#c2410c;margin-bottom:6px">③ 장부 외 현금 유출</div>
       <div style="font-size:12.5px;color:var(--t2);line-height:1.7">
         반대로 <b>현금은 나가지만 비용으로 잡히지 않는 항목</b>도 있습니다. 대출 원금 상환이 대표적입니다 — 이자만 비용(이자비용)이고, 원금 상환은 부채(단기차입금)가 줄어드는 것이라 손익계산서에는 나타나지 않습니다.<br>
-        현재 단기차입금 잔액은 <b id="fsg-short-loan">-</b>입니다. 이 금액을 상환하면 통장 잔액은 줄어들지만, 손익계산서상 비용은 발생하지 않습니다.<br>
+        현재 차입금 잔액은 <b id="fsg-short-loan">-</b>입니다. 이 금액을 상환하면 통장 잔액은 줄어들지만, 손익계산서상 비용은 발생하지 않습니다.<br>
         <b>간병비 선지급</b>도 같습니다. 간병인에게 먼저 준 간병비는 업체에서 돌려받을 돈(대지급금)이라 비용이 아닙니다. 현재 업체에서 아직 못 받은 대지급금은 <b id="fsg-advance">-</b>로, 이만큼 통장 잔액이 일시적으로 줄어 있습니다.
       </div>
     </div>
@@ -1074,7 +1074,7 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
       <div class="fg" id="lf-partner-wrap" style="display:none">
         <label class="fl" style="color:var(--P);font-weight:600">매출처</label>
         <input type="text" class="fc" id="lf-partner" placeholder="예: 유바이오젠" style="border-color:var(--P)">
-        <div class="fh">매출액 계정 시 매출처를 입력하세요</div>
+        <div class="fh">간병비회수(업체 입금) 계정 시 업체명을 입력하세요</div>
       </div>
       <div class="fg full"><label class="fl">비고</label><input type="text" class="fc" id="lf-note" placeholder="메모"></div>
     </div>
@@ -1308,7 +1308,8 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
     <div class="fgrid">
       <div class="fg full"><label class="fl">계정과목명 *</label><input type="text" class="fc" id="aa-name" placeholder="예: 광고선전비" oninput="updateAcctPrev()"></div>
       <div class="fg"><label class="fl">유형</label><select class="fc" id="aa-type"><option value="both">입금·출금·카드 공통</option><option value="income">입금 전용</option><option value="expense">출금·카드 전용</option></select></div>
-      <div class="fg"><label class="fl">배지 색상</label><select class="fc" id="aa-color" onchange="updateAcctPrev()"><option value="ab0">파랑</option><option value="ab1">초록</option><option value="ab2">주황</option><option value="ab3">보라</option><option value="ab4">청록</option><option value="ab5">빨강</option><option value="ab6">회색</option><option value="ab7">연보라</option></select></div>
+      <div class="fg"><label class="fl">재무제표 분류 *</label><select class="fc" id="aa-fs" onchange="updateAcctPrev()"><option value="">선택하세요</option></select></div>
+      <div class="fg full"><div class="fh" id="aa-fs-help"></div></div>
       <div class="fg full"><div style="padding:8px 12px;background:var(--sf2);border-radius:var(--r2);font-size:12.5px">미리보기: <span class="at ab6" id="aa-prev">계정과목</span></div></div>
     </div>
     <div class="mft"><button class="btn" onclick="closeMo('mo-acct-add')">취소</button><button class="btn p" onclick="saveAcct()">✓ 저장</button></div>
@@ -1377,7 +1378,7 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
 <script>
 // ─── 앱 버전 / 새 버전 감지 ───
 // 배포마다 이 값과 저장소 루트의 version.txt를 같은 값으로 올려야 함 (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_06_01';
+const APP_BUILD = '26_10_06_02';
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
     .then(r => r.ok ? r.text() : null)
@@ -1440,54 +1441,76 @@ let bankAccs = [];
 let cardRegs = [];
 let expReqs  = []; // 지출결의서
  
-/* 공통 계정과목 */
+/* 공통 계정과목 — fs: 재무제표 분류(FS_CATS 키). 배지 색상은 분류에 따라 자동 지정 */
 let accts = [
-  {name:'급여',type:'expense',color:'ab0'},
-  {name:'복리후생비',type:'expense',color:'ab1'},
-  {name:'보험료',type:'expense',color:'ab2'},
-  {name:'인쇄비',type:'expense',color:'ab2'},
-  {name:'소모품비',type:'expense',color:'ab6'},
-  {name:'접대비',type:'expense',color:'ab2'},
-  {name:'임차료',type:'expense',color:'ab3'},
-  {name:'통신비',type:'expense',color:'ab4'},
-  {name:'차량유지비',type:'expense',color:'ab6'},
-  {name:'외주비',type:'expense',color:'ab3'},
-  {name:'외주용역비',type:'expense',color:'ab3'},
-  {name:'세금과공과',type:'expense',color:'ab5'},
-  {name:'인출금',type:'expense',color:'ab6'},
-  {name:'보통주자본금',type:'income',color:'ab0'},
-  {name:'매출액',type:'income',color:'ab1'},
-  {name:'수수료수입',type:'income',color:'ab1'},
-  {name:'기타수입',type:'income',color:'ab1'},
-  {name:'기타',type:'both',color:'ab6'},
+  {name:'급여',type:'expense',fs:'sga'},          // 일반 직원 급여(근로소득)
+  {name:'외주용역비',type:'expense',fs:'sga'},     // 프리랜서(3.3%) 보수·외주 용역
+  {name:'복리후생비',type:'expense',fs:'sga'},
+  {name:'보험료',type:'expense',fs:'sga'},
+  {name:'인쇄비',type:'expense',fs:'sga'},
+  {name:'소모품비',type:'expense',fs:'sga'},
+  {name:'접대비',type:'expense',fs:'sga'},
+  {name:'임차료',type:'expense',fs:'sga'},
+  {name:'통신비',type:'expense',fs:'sga'},
+  {name:'차량유지비',type:'expense',fs:'sga'},
+  {name:'세금과공과',type:'expense',fs:'sga'},
+  {name:'지급수수료',type:'both',fs:'sga'},
+  {name:'수수료수입',type:'income',fs:'fee'},
+  {name:'기타수입',type:'income',fs:'otherInc'},
+  {name:'이자수익',type:'both',fs:'otherInc'},
+  {name:'간병비선지급',type:'both',fs:'careAdv'},
+  {name:'간병비회수',type:'both',fs:'careRecv'},
+  {name:'가수금',type:'both',fs:'suspense'},
+  {name:'보통주자본금',type:'income',fs:'capital'},
+  {name:'인출금',type:'expense',fs:'draw'},
+  {name:'기타',type:'both',fs:'mixed'},
 ];
-/* 세무 장부 기준(2026-10)으로 새로 필요한 계정 — 저장된 계정목록에 없으면 로드 시 자동 추가 */
+/* 저장된 계정목록에 없으면 로드 시 자동 추가되는 필수 계정 */
 const REQUIRED_ACCTS = [
-  {name:'외주용역비',type:'expense',color:'ab3'},   // 프리랜서 직원 보수(3.3%) 전용
-  {name:'인출금',type:'expense',color:'ab6'},       // 대표자 인출 — 비용 아님(자본 차감)
-  {name:'수수료수입',type:'income',color:'ab1'},    // 간병비 없이 수수료만 들어온 입금
-  {name:'간병비선지급',type:'expense',color:'ab0'},  // 간병인에게 먼저 준 간병비 — 비용 아님(대지급금)
-  {name:'간병비회수',type:'income',color:'ab1'},     // 업체 입금(간병비+수수료) — 매출 아님(대지급금 회수)
+  {name:'외주용역비',type:'expense',fs:'sga'},      // 프리랜서 직원 보수(3.3%) 전용
+  {name:'인출금',type:'expense',fs:'draw'},         // 대표자 인출 — 비용 아님(자본 차감)
+  {name:'수수료수입',type:'income',fs:'fee'},       // 간병비 없이 수수료만 들어온 입금
+  {name:'간병비선지급',type:'both',fs:'careAdv'},   // 간병인에게 먼저 준 간병비 — 비용 아님(대지급금)
+  {name:'간병비회수',type:'both',fs:'careRecv'},    // 업체 입금(간병비+수수료) — 매출 아님(대지급금 회수)
 ];
 /* ══════════════════════════════════════
-   재무제표 계정 분류 기준 (단일 소스)
-   - calcFSData()(재무제표 합계 계산)와 getDrillRows()(드릴다운 원천 조회)가
-     반드시 동일한 기준으로 계정을 나눠야 "합계 = 원천 데이터 합"이 항상 성립함.
-   - 계정을 추가/변경할 때는 이 목록만 고치면 두 함수에 자동 반영됨(따로 안 고쳐도 됨).
+   재무제표 분류 (단일 소스) — 2026-10 계정과목별 분류 방식으로 개편
+   - 각 계정과목에 재무제표 분류(fs)를 지정하고, calcPL/calcFSData/getDrillRows는 계정 "이름"이 아니라
+     이 분류로 집계한다 → 계정을 새로 만들어도 분류만 고르면 재무제표에 바로 반영됨.
+   - dir: 정상 방향. 반대 방향 거래는 차감(−)으로 반영 (예: 통신비 환급 입금 → 통신비 차감, 차입금 상환 출금 → 차입금 차감)
+   - 모든 입출금이 어느 분류로든 반드시 잡혀야 재무상태표 차변=대변이 성립함.
 ══════════════════════════════════════ */
-// ※ '매출액' 계정 = 업체 입금(간병비 대지급 상환분 + 수수료). 2026-10부터 이 입금 전체를 매출로 보지 않고
-//    외상매출금 매칭 결과로 간병비 몫(대지급금 회수)과 수수료 몫(미수수수료 회수)으로 나눈다. 매칭 안 된 입금은 가수금.
-const FS_SALE_ACCTS          = ['간병비회수','매출액'];   // 업체 입금(간병비+수수료) 계정 — '매출액'은 이전 데이터 호환
-const CARE_PAY_ACCTS         = ['간병비선지급','급여'];   // 지출결의서 간병 지급건 계정 — '급여'는 이전 데이터 호환
-const isCarePayAcct = a => CARE_PAY_ACCTS.includes(a);
-const isCareDepAcct = a => FS_SALE_ACCTS.includes(a);
-const FS_FEE_ACCTS           = ['수수료수입'];           // 수수료만 직접 들어온 입금 — 입금일 기준 수수료수입
-const FS_CAPITAL_ACCTS       = ['보통주자본금'];           // 자본금으로 인식할 계정
-const FS_DRAW_ACCTS          = ['인출금'];               // 대표자 인출 — 판관비 제외, 자본 차감
-const FS_OTHER_INCOME_ACCTS  = ['기타수입','이자수익'];     // 영업외수익으로 인식할 계정
-const FS_NONOP_EXPENSE_ACCTS = ['이자비용'];               // 영업외비용(판관비 제외 대상) 계정
-const FS_SGA_ACCTS = ['급여','외주용역비','복리후생비','보험료','인쇄비','소모품비','접대비',
-                       '임차료','통신비','차량유지비','외주비','세금과공과','지급수수료'];
+const FS_CATS = {
+  sga:      { label:'판매비와관리비',   short:'판관비',     dir:'expense', color:'ab2', grp:'비용' },
+  nonOpExp: { label:'영업외비용',       short:'영업외비용', dir:'expense', color:'ab5', grp:'비용' },
+  fee:      { label:'수수료수입(매출)', short:'수수료수입', dir:'income',  color:'ab1', grp:'수익' },
+  otherInc: { label:'영업외수익',       short:'영업외수익', dir:'income',  color:'ab4', grp:'수익' },
+  careAdv:  { label:'간병비 선지급(대지급금·자산)', short:'대지급금', dir:'expense', color:'ab0', grp:'자산' },
+  careRecv: { label:'간병비 회수(업체 입금·외상매출금 매칭)', short:'대지급금 회수', dir:'income', color:'ab0', grp:'자산' },
+  suspense: { label:'가수금(부채)',     short:'가수금',     dir:'income',  color:'ab3', grp:'부채' },
+  loan:     { label:'차입금(부채)',     short:'차입금',     dir:'income',  color:'ab3', grp:'부채' },
+  capital:  { label:'자본금',           short:'자본금',     dir:'income',  color:'ab7', grp:'자본' },
+  draw:     { label:'인출금(자본 차감)', short:'인출금',    dir:'expense', color:'ab7', grp:'자본' },
+  mixed:    { label:'기타(출금→판관비 기타 / 입금→영업외수익)', short:'기타', dir:'', color:'ab6', grp:'기타' },
+};
+/* 분류가 지정되지 않은 계정의 기본 분류 (이전 이름 포함) */
+const FS_CAT_DEFAULT = {
+  '급여':'sga','외주용역비':'sga','외주비':'sga','복리후생비':'sga','보험료':'sga','인쇄비':'sga','소모품비':'sga',
+  '접대비':'sga','임차료':'sga','통신비':'sga','차량유지비':'sga','세금과공과':'sga','지급수수료':'sga',
+  '수수료수입':'fee','기타수입':'otherInc','이자수익':'otherInc','이자비용':'nonOpExp',
+  '간병비선지급':'careAdv','간병비회수':'careRecv','매출액':'careRecv',
+  '가수금':'suspense','단기차입금':'loan','보통주자본금':'capital','인출금':'draw','기타':'mixed',
+};
+/* 이전 계정명 → 현재 계정명 (계정 정리 1회 변환 대상) */
+const ACCT_RENAME = { '매출액':'간병비회수', '외주비':'외주용역비' };
+function acctCat(name) {
+  const a = accts.find(x => x.name === name);
+  if(a && a.fs && FS_CATS[a.fs]) return a.fs;
+  return FS_CAT_DEFAULT[name] || '';
+}
+const fsCatAccts = cat => accts.filter(a => acctCat(a.name) === cat).map(a => a.name);
+const isCarePayAcct = a => acctCat(a) === 'careAdv';   // 지출결의서 간병 지급건 계정
+const isCareDepAcct = a => acctCat(a) === 'careRecv';  // 업체 입금(간병비+수수료) 계정
 const CARE_FEE_PER_DAY = 5000;                           // 간병 일당 수수료
 
 /* ══════════════════════════════════════
@@ -1499,7 +1522,7 @@ const CARE_FEE_PER_DAY = 5000;                           // 간병 일당 수수
 ══════════════════════════════════════ */
 function isCareReq(t) {
   if(!t) return false;
-  if(t.acct === '간병비선지급') return true;          // 간병비선지급 계정은 항상 대지급
+  if(isCarePayAcct(t.acct)) return true;             // 간병비선지급 분류 계정은 항상 대지급
   return t.acct === '급여' && (Number(t.expectedRev||0) > 0 || Number(t.careDays||0) > 0); // 이전 데이터 호환
 }
 function careFeeOf(t) {
@@ -1515,12 +1538,12 @@ function buildCareBook() {
   const careLedIds = new Set();
   ledger.forEach(l => {
     if(l.type !== 'expense') return;
-    if(l.acct === CARE_LED_LABEL || (l.linkedExpId && isCareReq(reqById[String(l.linkedExpId)]))) careLedIds.add(String(l.id));
+    if(isCarePayAcct(l.acct) || (l.linkedExpId && isCareReq(reqById[String(l.linkedExpId)]))) careLedIds.add(String(l.id));
   });
   // 업체 입금 분할
   const { depAlloc } = allocateARDeposits();
   const depSplit = [];
-  ledger.filter(t => t.type==='income' && FS_SALE_ACCTS.includes(t.acct)).forEach(t => {
+  ledger.filter(t => t.type==='income' && isCareDepAcct(t.acct)).forEach(t => {
     const amt = Number(t.amount||0);
     const a = depAlloc[String(t.id)];
     let care = 0, fee = 0;
@@ -1547,53 +1570,75 @@ const CARE_LED_LABEL = '간병비선지급';
 const CARE_IN_LABEL  = '간병비회수';   // 업체 입금('매출액' 계정) 표시명 — 간병비 회수분+수수료가 섞인 입금
 function careReqIdSet() { return new Set(expReqs.filter(isCareReq).map(t => String(t.id))); }
 function ledAcctLabel(t, careSet) {
-  if(t && t.type === 'expense' && (t.acct === CARE_LED_LABEL || (t.linkedExpId && (careSet || careReqIdSet()).has(String(t.linkedExpId))))) return CARE_LED_LABEL;
-  if(t && t.type === 'income' && FS_SALE_ACCTS.includes(t.acct)) return CARE_IN_LABEL;
+  if(t && t.type === 'expense' && (isCarePayAcct(t.acct) || (t.linkedExpId && (careSet || careReqIdSet()).has(String(t.linkedExpId))))) return isCarePayAcct(t.acct) ? t.acct : CARE_LED_LABEL;
+  if(t && t.type === 'income' && t.acct === '매출액') return CARE_IN_LABEL;   // 정리 전 이전 이름
   return (t && t.acct) || '미분류';
 }
 function isCareLedger(l, cb) { return !!l && cb.careLedIds.has(String(l.id)); }
-/* 판관비 집계 대상 출금인지 (영업외비용·간병비 대지급·대표자 인출 제외) */
-function isSgaLedger(l, cb) {
-  return l.type === 'expense' && !FS_NONOP_EXPENSE_ACCTS.includes(l.acct) && !FS_DRAW_ACCTS.includes(l.acct) && !isCareLedger(l, cb);
+/* 입출금 1건의 재무제표 분류 — 재무제표 계산·드릴다운이 모두 이 함수 하나만 쓴다
+   반환: { cat, sign(+1 정상방향 / −1 반대방향), key(표시 계정), unassigned(분류 미지정 여부) } */
+function fsClass(t, cb) {
+  const inc = t.type === 'income';
+  if(!inc && cb && isCareLedger(t, cb)) return { cat:'careAdv', sign:1, key:'간병비선지급' };
+  const cat = acctCat(t.acct);
+  const key = t.acct || '미분류';
+  if(!cat || cat === 'mixed') {
+    if(!inc) return { cat:'sga', sign:1, key:'기타', unassigned: !cat };
+    return cat ? { cat:'otherInc', sign:1, key }                                   // '기타' 입금 → 영업외수익
+               : { cat:'suspense', sign:1, key:'미분류 입금', unassigned:true };    // 분류 없는 입금 → 가수금(정리 대상)
+  }
+  if(cat === 'careRecv' && !inc) return { cat:'suspense', sign:-1, key:'업체 환불' }; // 업체 입금 환불 → 가수금 차감
+  return { cat, sign: (inc ? 'income' : 'expense') === FS_CATS[cat].dir ? 1 : -1, key };
 }
-/* 손익 계산 (화면 상태와 무관한 순수 함수) — calcFSData·월초 팝업·현재순이익이 공유 */
+const fsAmt = (t, c) => c.sign * Number(t.amount||0);
+/* 기간 입출금을 분류별로 합산: { cat: { key: 금액 } } */
+function fsSum(rows, cb) {
+  const out = {};
+  rows.forEach(t => {
+    const c = fsClass(t, cb);
+    if(c.cat === 'careRecv') return;   // 업체 입금은 buildCareBook().depSplit에서 간병비/수수료/가수금으로 분할
+    const m = out[c.cat] || (out[c.cat] = {});
+    m[c.key] = (m[c.key]||0) + fsAmt(t, c);
+  });
+  return out;
+}
+const fsTotal = m => Object.values(m||{}).reduce((s,v)=>s+v, 0);
+/* 판관비 집계 대상인지 (드릴다운 등 호환용) */
+function isSgaLedger(l, cb) { return fsClass(l, cb).cat === 'sga'; }
 function calcPL(start, end, cb) {
   cb = cb || buildCareBook();
   const inR = x => !!x && String(x).slice(0,10) >= start && String(x).slice(0,10) <= end;
   const ledPeriod = fsFilter(ledger, 'date', start, end);
+  const sum = fsSum(ledPeriod, cb);   // 분류별·계정별 합계 (반대 방향은 차감)
   // 수수료수입 ① 간병 지급건 발생분 (지급일 기준)
   const feeRows = cb.feeReqs.filter(t => inR(t.payDate)).map(t => ({ req: t, fee: careFeeOf(t) }));
   const feeAccrued = feeRows.reduce((s,r) => s + r.fee, 0);
-  // 수수료수입 ② 수수료만 직접 입금된 건 (입금일 기준)
-  const feeDirectRows = ledPeriod.filter(t => t.type==='income' && FS_FEE_ACCTS.includes(t.acct));
-  const feeDirect = feeDirectRows.reduce((s,t) => s + Number(t.amount||0), 0);
+  // 수수료수입 ② '수수료수입' 분류 계정으로 직접 입금된 건 (입금일 기준)
+  const feeDirectRows = ledPeriod.filter(t => fsClass(t, cb).cat === 'fee');
+  const feeDirect = fsTotal(sum.fee);
   const totalRev = feeAccrued + feeDirect;
   const taxBuy = fsFilter(taxInv,'date',start,end).filter(t=>t.ditype==='매입');
   const taxBuyAmt = taxBuy.reduce((s,t)=>s+Number(t.supply||0),0);
   const grossProfit = totalRev - taxBuyAmt;
-  const sgaMap = {};
-  ledPeriod.filter(t => isSgaLedger(t, cb)).forEach(t => {
-    const k = FS_SGA_ACCTS.includes(t.acct) ? t.acct : '기타';
-    sgaMap[k] = (sgaMap[k]||0) + Number(t.amount||0);
-  });
-  const totalSGA = Object.values(sgaMap).reduce((s,v)=>s+v, 0);
+  // 판관비 — 판관비 분류 계정별 (분류 미지정·'기타' 출금은 '기타'로)
+  const sgaMap = { ...(sum.sga||{}) };
+  const totalSGA = fsTotal(sgaMap);
   const opProfit = grossProfit - totalSGA;
-  // 영업외수익 — 계정별(이자수익·기타수입)로도 나눠 둔다
-  const otherIncMap = {};
-  FS_OTHER_INCOME_ACCTS.forEach(a => { otherIncMap[a] = 0; });
-  ledPeriod.filter(t => t.type==='income' && FS_OTHER_INCOME_ACCTS.includes(t.acct))
-    .forEach(t => { otherIncMap[t.acct] += Number(t.amount||0); });
-  const otherInc = Object.values(otherIncMap).reduce((s,v)=>s+v, 0);
-  const interestExp = ledPeriod.filter(t => t.type==='expense' && t.acct==='이자비용')
-    .reduce((s,t)=>s+Number(t.amount||0), 0);
+  // 영업외수익/비용 — 해당 분류 계정은 0원이어도 표시
+  const otherIncMap = {}; fsCatAccts('otherInc').forEach(a => { otherIncMap[a] = 0; });
+  Object.entries(sum.otherInc||{}).forEach(([k,v]) => { otherIncMap[k] = (otherIncMap[k]||0) + v; });
+  const otherInc = fsTotal(otherIncMap);
+  const nonOpExpMap = {}; fsCatAccts('nonOpExp').forEach(a => { nonOpExpMap[a] = 0; });
+  Object.entries(sum.nonOpExp||{}).forEach(([k,v]) => { nonOpExpMap[k] = (nonOpExpMap[k]||0) + v; });
+  const interestExp = fsTotal(nonOpExpMap);   // (변수명 호환) 영업외비용 합계
   const nonOp = otherInc - interestExp;
   // 참고: 기간 중 간병비 대지급 흐름 (손익 아님)
-  const careOut = ledPeriod.filter(t => isCareLedger(t, cb)).reduce((s,t)=>s+Number(t.amount||0), 0);
+  const careOut = fsTotal(sum.careAdv);
   const careIn  = cb.depSplit.filter(x => inR(x.date)).reduce((s,x)=>s+x.care, 0);
   const suspenseIn = cb.depSplit.filter(x => inR(x.date)).reduce((s,x)=>s+x.unalloc, 0);
   return { start, end, feeRows, feeAccrued, feeDirectRows, feeDirect, totalRev,
     taxBuy, taxBuyAmt, cogs: taxBuyAmt, grossProfit, sgaMap, totalSGA, opProfit,
-    otherInc, otherIncMap, interestExp, nonOp, netIncome: opProfit + nonOp, careOut, careIn, suspenseIn, cb };
+    otherInc, otherIncMap, interestExp, nonOpExpMap, nonOp, netIncome: opProfit + nonOp, careOut, careIn, suspenseIn, cb };
 }
 /* 공통 자동분류 규칙 */
 let rules = [
@@ -1607,9 +1652,9 @@ let rules = [
   {kw:['소모품','문구','사무용품'],a:'소모품비'},
   {kw:['접대','식대','회식'],a:'접대비'},
   {kw:['인쇄','출판','문화사'],a:'인쇄비'},
-  {kw:['외주','용역'],a:'외주비'},
+  {kw:['외주','용역'],a:'외주용역비'},
   {kw:['모바일','타행이체'],a:'보통주자본금'},
-  {kw:['간병','요양','케어'],a:'매출액'},
+  {kw:['간병','요양','케어'],a:'간병비회수'},
 ];
  
 let nxId=100, nxTax=300, nxCard=400;
@@ -1727,12 +1772,18 @@ async function initApp() {
     const stRules = stSnap.find(d=>d._type==='rules');
     const stSys   = stSnap.find(d=>d._type==='sysInfo');
     if(stAccts && stAccts.data) accts = stAccts.data;
-    // 세무 장부 기준 신규 계정이 저장 목록에 없으면 추가 후 저장 (1회성)
+    // 세무 장부 기준 신규 계정이 저장 목록에 없으면 추가 (1회성)
+    let acctsDirty = false;
     const missingAccts = REQUIRED_ACCTS.filter(r => !accts.some(a => a.name === r.name));
-    if(missingAccts.length) {
-      accts = [...accts, ...missingAccts.map(a => ({...a}))];
-      if(stAccts) fsSet(COL.settings,'accts',{_type:'accts',data:accts});
-    }
+    if(missingAccts.length) { accts = [...accts, ...missingAccts.map(a => ({...a}))]; acctsDirty = true; }
+    // 재무제표 분류(fs)가 없는 계정은 기본 분류로 채우고, 배지 색상을 분류 색상으로 맞춤
+    accts = accts.map(a => {
+      const fs = (a.fs && FS_CATS[a.fs]) ? a.fs : (FS_CAT_DEFAULT[a.name] || '');
+      const color = fs ? FS_CATS[fs].color : (a.color || 'ab6');
+      if(fs !== (a.fs||'') || color !== a.color) { acctsDirty = true; return { ...a, fs, color }; }
+      return a;
+    });
+    if(acctsDirty && stAccts) fsSet(COL.settings,'accts',{_type:'accts',data:accts});
     if(stRules && stRules.data) rules = stRules.data;
     // 지출결의서 '급여' → '간병비선지급' 1회 변환 (연동된 입출금 출금도 같이) — 이후 새로 쓰는 '급여'는 건드리지 않음
     const stMig = stSnap.find(d=>d._type==='migrations') || {_type:'migrations'};
@@ -1804,7 +1855,8 @@ const fmtS = n => {
   return '₩'+fmt(n);
 };
 const isMob = () => window.innerWidth <= 860;
-const acctColor = name => (accts.find(a=>a.name===name)||{color:'ab6'}).color;
+/* 배지 색상 = 재무제표 분류 색상 (분류 미지정이면 저장된 색상/회색) */
+const acctColor = name => { const c = acctCat(name); return c ? FS_CATS[c].color : ((accts.find(a=>a.name===name)||{}).color || 'ab6'); };
 const autoClassify = text => {
   if(!text) return '기타';
   const d = text.toLowerCase();
@@ -2175,7 +2227,7 @@ function recalcExpLedgerBalance() {
 }
 
 
-/* 매출액 계정 선택 시 매출처 입력란 표시 */
+/* 간병비회수 분류 계정 선택 시 업체(매출처) 입력란 표시 */
 function onLedgerAcctChange() {
   const acct = document.getElementById('lf-acct').value;
   const wrap = document.getElementById('lf-partner-wrap');
@@ -3859,7 +3911,7 @@ function computeARMatching() {
 /* ══════════════════════════════
    오입금 의심 입금 탐지
    ══════════════════════════════
-   - 매출액(income, acct='매출액') 입금 중 아래 사유에 해당하는 건을 "오입금 의심"으로 별도 표시
+   - 업체 입금(income, 간병비회수 분류 계정) 중 아래 사유에 해당하는 건을 "오입금 의심"으로 별도 표시
      ① 이름매칭실패   : 입금 내용(desc)에서 환자-간병인 이름쌍을 추출하지 못함
      ② 매칭그룹없음   : 이름쌍은 추출됐지만 대응하는 급여 지급건(그룹)이 존재하지 않음
      ③ 초과입금       : 매칭된 그룹의 실입금 누적액이 지급 예상매출액을 초과한 부분(그룹 내 시간순 누적 기준)
@@ -4750,7 +4802,7 @@ function renderExpAR() {
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">
       <div class="sc"><div class="sc-l" style="color:var(--P);font-weight:700">예상매출액 합계</div><div class="sc-v" style="color:var(--P);font-size:18px;font-weight:700">₩${fmt(totalExpected)}</div></div>
       <div class="sc"><div class="sc-l" style="color:var(--G);font-weight:700">수수료 합계</div><div class="sc-v" style="color:var(--G);font-size:18px;font-weight:700">₩${fmt(totalFee)}</div></div>
-      <div class="sc"><div class="sc-l" style="color:var(--P);font-weight:700">실 입금 매출액</div><div class="sc-v" style="color:var(--P);font-size:18px;font-weight:700">₩${fmt(totalReceived)}</div></div>
+      <div class="sc"><div class="sc-l" style="color:var(--P);font-weight:700">업체 입금(간병비회수)</div><div class="sc-v" style="color:var(--P);font-size:18px;font-weight:700">₩${fmt(totalReceived)}</div></div>
       <div class="sc"><div class="sc-l" style="color:var(--R);font-weight:700">외상매출금 (미수금)</div><div class="sc-v" style="color:var(--R);font-size:18px;font-weight:700">₩${fmt(netAR)}</div></div>
     </div>
 
@@ -4911,7 +4963,7 @@ function renderExpMatch() {
         <br>${matchUnmatchedFiltered.map(t=>`「${t.title}」`).join(', ')}
       </div>` : ''}
       <div style="padding:8px 14px;font-size:11.5px;color:var(--t3);border-top:1px solid var(--bd)">
-        매칭 방식: 지출결의서 제목의 <b>환자명</b>과 수취인(<b>간병인명</b>)을, 입출금 내역 매출액 계정의 내용(예: 타행IB 환자명-간병인명)에서 추출한 이름과 대조합니다. 검색 필터는 표시 대상만 좁힐 뿐, 지급·입금 합계는 항상 전체 기간 기준으로 정확히 매칭됩니다.
+        매칭 방식: 지출결의서 제목의 <b>환자명</b>과 수취인(<b>간병인명</b>)을, 입출금 내역 간병비회수 계정의 내용(예: 타행IB 환자명-간병인명)에서 추출한 이름과 대조합니다. 검색 필터는 표시 대상만 좁힐 뿐, 지급·입금 합계는 항상 전체 기간 기준으로 정확히 매칭됩니다.
       </div>
     </div>`;
 
@@ -4975,9 +5027,9 @@ function renderExpDetail() {
       </table></div>
     </details>
 
-    <!-- 실 입금 매출액 목록 (기본 접힘) -->
+    <!-- 업체 입금(간병비회수) 목록 (기본 접힘) -->
     <details class="card">
-      <summary style="padding:10px 14px;cursor:pointer;font-size:13px;font-weight:700;color:var(--G)">💳 실 입금 매출액 내역 (입출금내역 매출액 계정, 전체 ${incomeRows.length}건)</summary>
+      <summary style="padding:10px 14px;cursor:pointer;font-size:13px;font-weight:700;color:var(--G)">💳 업체 입금 내역 (입출금내역 간병비회수 계정, 전체 ${incomeRows.length}건)</summary>
       <div class="tw"><table>
         <thead><tr>
           <th style="width:88px">거래일자</th>
@@ -4991,7 +5043,7 @@ function renderExpDetail() {
               <td style="font-size:12.5px">${t.desc}</td>
               <td style="font-size:12px;color:var(--P)">${t.partner||'-'}</td>
               <td class="nm inc">${fmt(t.amount)}</td>
-            </tr>`).join('') : `<tr><td colspan="4" style="text-align:center;color:var(--tm);padding:20px">입금된 매출액 내역이 없습니다</td></tr>`}
+            </tr>`).join('') : `<tr><td colspan="4" style="text-align:center;color:var(--tm);padding:20px">업체 입금 내역이 없습니다</td></tr>`}
           <tr style="background:var(--sf2);font-weight:700">
             <td colspan="3" style="text-align:right;padding:8px 10px">실 입금 합계</td>
             <td class="nm inc">${fmt(totalReceived)}</td>
@@ -5300,6 +5352,13 @@ let _drillData = []; // 현재 모달 데이터 (CSV/인쇄용)
 function getDrillRows(key, start, end) {
   const [src, acct] = key.split(':');
   const rows = [];
+  // 분류 기준(fsClass)으로 입출금을 골라 부호 반영 금액으로 추가
+  const pushClassRows = (dateOk, catOk, cb) => ledger.filter(t => dateOk(t)).forEach(t => {
+    const c = fsClass(t, cb);
+    if(!catOk(c)) return;
+    rows.push({ date: t.date, acct: t.acct||'', partner: t.partner || t.bank||'', desc: t.desc||'',
+      amount: fsAmt(t, c), note: c.sign > 0 ? (t.note||'') : `(−) ${t.type==='income'?'입금':'출금'} 차감`, ledId: t.id });
+  });
 
   // calcFSData와 동일한 기간 조건
   const inRange = d => {
@@ -5308,7 +5367,7 @@ function getDrillRows(key, start, end) {
     return ds >= start && ds <= end;
   };
 
-  // calcFSData와 동일한 계정 분류 — 전역 공유 상수(FS_*) 사용 (중복 정의 금지: 어긋나면 드릴다운 불일치 발생)
+  // calcFSData와 동일한 계정 분류 — fsClass() 하나만 사용 (중복 정의 금지: 어긋나면 드릴다운 불일치 발생)
 
   if(src === 'taxSale') {
     // 세금계산서 매출 (참고)
@@ -5339,20 +5398,22 @@ function getDrillRows(key, start, end) {
       desc: `${r.req.title||''} (간병 ${r.req.careDays||0}일)`,
       amount: r.fee, note: '간병인 지급일 기준'
     }));
-    if(acct === 'ALL' || acct === 'direct') pl.feeDirectRows.forEach(t => rows.push({
+    if(acct === 'ALL' || acct === 'direct') pl.feeDirectRows.forEach(t => { const c = fsClass(t, pl.cb); rows.push({
       date: t.date, acct: t.acct, partner: t.partner || t.bank || '', desc: t.desc || '',
-      amount: Number(t.amount||0), note: '직접 입금', ledId: t.id
-    }));
+      amount: fsAmt(t, c), note: c.sign > 0 ? '직접 입금' : '(−) 환불 출금', ledId: t.id
+    }); });
 
   } else if(src === 'bs') {
     // ★ 재무상태표 신규 항목 — calcFSData와 동일 기준 (기간 말 end까지 누적)
     const cb = buildCareBook();
     const upTo = x => !!x && String(x).slice(0,10) <= end;
     if(acct === 'advance') {
-      ledger.filter(l => upTo(l.date) && isCareLedger(l, cb)).forEach(l => rows.push({
-        date: l.date, acct: '간병비 선지급', partner: l.partner || l.bank || '', desc: l.desc || '',
-        amount: Number(l.amount||0), note: '(+) 대지급', ledId: l.id
-      }));
+      ledger.filter(l => upTo(l.date)).forEach(l => {
+        const c = fsClass(l, cb);
+        if(c.cat !== 'careAdv') return;
+        rows.push({ date: l.date, acct: '간병비 선지급', partner: l.partner || l.bank || '', desc: l.desc || '',
+          amount: fsAmt(l, c), note: c.sign > 0 ? '(+) 대지급' : '(−) 반환 입금', ledId: l.id });
+      });
       cb.depSplit.filter(x => upTo(x.date) && x.care).forEach(x => rows.push({
         date: x.date, acct: '간병비 회수', partner: x.row.partner || x.row.bank || '', desc: x.row.desc || '',
         amount: -x.care, note: `(−) 입금 ${Number(x.amt).toLocaleString('ko-KR')}원 중 간병비 몫`, ledId: x.row.id
@@ -5371,51 +5432,34 @@ function getDrillRows(key, start, end) {
         date: x.date, acct: '가수금', partner: x.row.partner || x.row.bank || '', desc: x.row.desc || '',
         amount: x.unalloc, note: x.parts.length ? '예상매출 초과분' : '지급건 매칭 안 됨', ledId: x.row.id
       }));
+      pushClassRows(t => upTo(t.date), c => c.cat === 'suspense', cb);
     } else if(acct === 'draw') {
-      ledger.filter(t => t.type==='expense' && FS_DRAW_ACCTS.includes(t.acct) && upTo(t.date)).forEach(t => rows.push({
-        date: t.date, acct: t.acct, partner: t.partner || t.bank || '', desc: t.desc || '',
-        amount: Number(t.amount||0), note: '대표자 인출', ledId: t.id
-      }));
+      pushClassRows(t => upTo(t.date), c => c.cat === 'draw', cb);
+    } else if(acct === 'loan') {
+      pushClassRows(t => upTo(t.date), c => c.cat === 'loan', cb);
+    } else if(acct === 'capital') {
+      pushClassRows(t => upTo(t.date), c => c.cat === 'capital', cb);
     }
 
   } else if(src === 'ledger_income') {
-    // ★ 입출금 입금 — calcFSData ledSale와 동일 기준
-    ledger
-      .filter(t => t.type==='income' && inRange(t.date))
-      .filter(t => {
-        if(acct === 'ALL') return FS_SALE_ACCTS.includes(t.acct); // 매출액 계정만
-        if(acct === '영업외수익') return FS_OTHER_INCOME_ACCTS.includes(t.acct); // 이자수익+기타수입 전체
-        if(FS_OTHER_INCOME_ACCTS.includes(acct)) return t.acct===acct;
-        if(acct === '보통주자본금') return FS_CAPITAL_ACCTS.includes(t.acct);
-        if(acct === '단기차입금') return t.acct==='단기차입금';
-        return t.acct===acct;
-      })
-      .forEach(t => rows.push({
-        date: t.date, acct: t.acct||'',
-        partner: t.partner || t.bank||'', desc: t.desc||'',
+    // ★ 입출금 입금 계열 — calcPL/calcFSData와 같은 fsClass 기준 (반대 방향 거래는 −로 표시)
+    const cbI = buildCareBook();
+    if(acct === 'ALL') {   // 업체 입금(간병비회수 분류)
+      ledger.filter(t => t.type==='income' && inRange(t.date) && isCareDepAcct(t.acct)).forEach(t => rows.push({
+        date: t.date, acct: t.acct||'', partner: t.partner || t.bank||'', desc: t.desc||'',
         amount: Number(t.amount||0), note: t.note||'', ledId: t.id
       }));
+    } else if(acct === '영업외수익') {
+      pushClassRows(t => inRange(t.date), c => c.cat === 'otherInc', cbI);
+    } else {
+      pushClassRows(t => inRange(t.date), c => c.cat === 'otherInc' && c.key === acct, cbI);
+    }
 
   } else if(src === 'ledger_exp') {
-    // ★ 입출금 출금 — calcFSData의 sgaMap과 동일 기준
-    // (이자비용은 영업외비용이라 판관비 집계에서 항상 제외 → calcFSData와 동일하게 'ALL'/'기타'에서도 제외)
-    // (간병비 대지급·대표자 인출금도 판관비가 아니므로 calcPL과 동일하게 제외)
+    // ★ 입출금 출금 계열(판관비·영업외비용) — calcPL의 sgaMap/nonOpExpMap과 동일 기준
     const cbExp = buildCareBook();
-    ledger
-      .filter(t => t.type==='expense' && inRange(t.date))
-      .filter(t => {
-        if(FS_NONOP_EXPENSE_ACCTS.includes(acct)) return t.acct===acct;
-        if(!isSgaLedger(t, cbExp)) return false;
-        if(acct === 'ALL') return true;
-        // 계정과목 일치 또는 '기타'로 묶인 것
-        if(acct === '기타') return !FS_SGA_ACCTS.includes(t.acct);
-        return t.acct===acct;
-      })
-      .forEach(t => rows.push({
-        date: t.date, acct: t.acct||'',
-        partner: t.partner || t.bank||'', desc: t.desc||'',
-        amount: Number(t.amount||0), note: t.note||'', ledId: t.id
-      }));
+    if(acct === 'ALL') pushClassRows(t => inRange(t.date), c => c.cat === 'sga', cbExp);
+    else pushClassRows(t => inRange(t.date), c => (c.cat === 'sga' || c.cat === 'nonOpExp') && c.key === acct, cbExp);
 
   } else if(src === 'ledger') {
     // 입출금 전체 (재무상태표 현금 등)
@@ -5449,8 +5493,8 @@ function getDrillRows(key, start, end) {
         }));
       // 실 수령 매출액 차감 행
       if(totalReceived > 0) rows.push({
-        date: '', acct: '(-) 입금 매출액',
-        partner: '', desc: '입출금내역 매출액 계정 입금 합계 (차감)',
+        date: '', acct: '(-) 업체 입금',
+        partner: '', desc: '입출금내역 간병비회수 계정 입금 합계 (차감)',
         amount: -totalReceived, note: '수령 완료'
       });
     } else if(acct === 'unpaid') {
@@ -5694,7 +5738,7 @@ function calcFSData(prefix) {
   const cb = buildCareBook();
   const pl = calcPL(start, end, cb);
   const { feeRows, feeAccrued, feeDirectRows, feeDirect, totalRev, taxBuy, taxBuyAmt, cogs, grossProfit,
-          sgaMap, totalSGA, opProfit, otherInc, otherIncMap, interestExp, nonOp, netIncome, careOut, careIn, suspenseIn } = pl;
+          sgaMap, totalSGA, opProfit, otherInc, otherIncMap, interestExp, nonOpExpMap, nonOp, netIncome, careOut, careIn, suspenseIn } = pl;
   const cogsNote = taxBuyAmt > 0 ? '세금계산서 매입 기준' : '해당 기간 매입 없음';
 
   // 세금계산서 매출 (참고용 — 계산서 발행액과 수수료수입 대조)
@@ -5705,6 +5749,8 @@ function calcFSData(prefix) {
   // 재무상태표 (기간 말 end 기준 누적)
   // ══════════════════════════════════════
   const upTo = x => !!x && String(x).slice(0,10) <= end;
+  // 기간 말까지 누적 — 분류별·계정별 합계 (calcPL과 같은 fsClass 기준)
+  const cumSum = fsSum(ledger.filter(l => upTo(l.date)), cb);
 
   // ① 현금·예금: 조회 기간 말 마지막 잔액
   const latestInPeriod = [...ledger]
@@ -5716,7 +5762,7 @@ function calcFSData(prefix) {
   const bsCash = latestInPeriod ? Number(latestInPeriod.balance) : 0;
 
   // ② 대지급금 = 간병인 선지급 누계 − 업체 입금 중 간병비 몫 누계
-  const careOutCum = ledger.filter(l => upTo(l.date) && isCareLedger(l, cb)).reduce((s,l)=>s+Number(l.amount||0), 0);
+  const careOutCum = fsTotal(cumSum.careAdv);
   const careInCum  = cb.depSplit.filter(x => upTo(x.date)).reduce((s,x)=>s+x.care, 0);
   const bsAdvance  = careOutCum - careInCum;
 
@@ -5736,11 +5782,17 @@ function calcFSData(prefix) {
   const totalAssets = bsCash + bsAdvance + bsFeeAR + bsArTax;
 
   // ── 부채 ──
-  const bsShortLoan = ledger
-    .filter(t => t.type==='income' && t.acct==='단기차입금')
-    .reduce((s,t) => s+Number(t.amount||0), 0);
-  // 가수금: 지급건과 매칭되지 않은 업체 입금(초과분 포함) — 매칭 정리 대상
-  const bsSuspense = cb.depSplit.filter(x => upTo(x.date)).reduce((s,x)=>s+x.unalloc, 0);
+  // 차입금: '차입금' 분류 계정 (입금 +, 상환 출금 −)
+  const bsShortLoan = fsTotal(cumSum.loan);
+  // 가수금: ① 지급건과 매칭되지 않은 업체 입금(초과분 포함) ② '가수금' 분류 계정·분류 미지정 입금 ③ 업체 환불(−)
+  const bsSuspenseUnalloc = cb.depSplit.filter(x => upTo(x.date)).reduce((s,x)=>s+x.unalloc, 0);
+  const bsSuspenseOther   = fsTotal(cumSum.suspense);
+  const bsSuspense = bsSuspenseUnalloc + bsSuspenseOther;
+  // 분류 미지정 계정 거래 (기간 말까지) — 계정과목 설정에서 재무제표 분류를 지정해야 정확해짐
+  const fsUnassigned = {};
+  ledger.filter(l => upTo(l.date)).forEach(l => {
+    if(fsClass(l, cb).unassigned) { const k = l.acct || '(계정 없음)'; fsUnassigned[k] = (fsUnassigned[k]||0) + 1; }
+  });
   // 미지급금(대기): 아직 검토/승인 전 지출결의서 — 지급 안 됨
   const bsUnpaid = expReqs
     .filter(t => t.status==='대기')
@@ -5756,32 +5808,19 @@ function calcFSData(prefix) {
   const totalLiab = bsSuspense + bsShortLoan + bsUnpaid + bsApproved + bsApTax;
 
   // ── 자본 ──
-  const bsCapital = ledger
-    .filter(t => t.type==='income' && t.acct==='보통주자본금')
-    .reduce((s,t) => s+Number(t.amount||0), 0);
+  const bsCapital = fsTotal(cumSum.capital);
   // 인출금: 대표자가 가져간 돈 (비용 아님, 자본 차감)
-  const bsDraw = ledger
-    .filter(t => t.type==='expense' && FS_DRAW_ACCTS.includes(t.acct) && upTo(t.date))
-    .reduce((s,t) => s+Number(t.amount||0), 0);
+  const bsDraw = fsTotal(cumSum.draw);
 
   // 미처분이익잉여금: 창립 이래 기간 말(end)까지 누적 손익 — calcPL과 같은 기준
-  const allToEnd = ledger.filter(l => l.date <= end);
-  const cumFeeDirect = allToEnd
-    .filter(t => t.type==='income' && FS_FEE_ACCTS.includes(t.acct))
-    .reduce((s,t) => s+Number(t.amount||0), 0);
+  const cumFeeDirect = fsTotal(cumSum.fee);
   const cumRev = feeAccCum + cumFeeDirect;
   const cumCogs = taxInv
     .filter(t => t.ditype==='매입' && t.date <= end)
     .reduce((s,t) => s+Number(t.supply||0), 0);
-  const cumSGA = allToEnd
-    .filter(t => isSgaLedger(t, cb))
-    .reduce((s,t) => s+Number(t.amount||0), 0);
-  const cumOtherInc = allToEnd
-    .filter(t => t.type==='income' && FS_OTHER_INCOME_ACCTS.includes(t.acct))
-    .reduce((s,t) => s+Number(t.amount||0), 0);
-  const cumIntExp = allToEnd
-    .filter(t => t.type==='expense' && t.acct==='이자비용')
-    .reduce((s,t) => s+Number(t.amount||0), 0);
+  const cumSGA      = fsTotal(cumSum.sga);
+  const cumOtherInc = fsTotal(cumSum.otherInc);
+  const cumIntExp   = fsTotal(cumSum.nonOpExp);
   const bsRetained = cumRev - cumCogs - cumSGA + cumOtherInc - cumIntExp;
   const bsRetainedLabel = '미처분이익잉여금';
 
@@ -5811,8 +5850,9 @@ function calcFSData(prefix) {
     taxSale, taxSaleAmt,
     taxBuy, taxBuyAmt, cogs, grossProfit,
     sgaMap, totalSGA, opProfit,
-    otherInc, otherIncMap, interestExp, nonOp, netIncome,
+    otherInc, otherIncMap, interestExp, nonOpExpMap, nonOp, netIncome,
     careOut, careIn, suspenseIn,
+    fsUnassigned,
     // B/S
     cashBal, arAmt, arTax, arWage, totalAssets,
     apAmt, totalLiab,
@@ -5834,6 +5874,10 @@ function renderIS(d, forPrint=false) {
 
   return `<div class="fs-wrap${forPrint?' fs-page-break':''}">
     ${fsHeader('손익계산서','Income Statement · 개인사업자 기준', d.label)}
+    ${(!forPrint && d.fsUnassigned && Object.keys(d.fsUnassigned).length) ? `<div style="margin:0 0 10px;padding:8px 12px;background:#fff7ed;border:1px solid #fdba74;border-radius:6px;font-size:12px;color:#9a3412;line-height:1.6">
+      ⚠ 재무제표 분류가 지정되지 않은 계정의 거래가 있습니다: ${Object.entries(d.fsUnassigned).map(([k,n])=>`<b>${k}</b> ${n}건`).join(', ')}<br>
+      출금은 판관비 '기타', 입금은 가수금으로 임시 처리했습니다. <b>계정과목 설정</b>에서 해당 계정의 재무제표 분류를 지정하거나 거래의 계정을 바꿔주세요.
+    </div>` : ''}
 
     <div class="fs-section">
       <div class="fs-section-title" style="cursor:pointer;user-select:none;display:flex;justify-content:space-between;align-items:center"
@@ -5889,8 +5933,10 @@ function renderIS(d, forPrint=false) {
     <div class="fs-section">
       <div class="fs-section-title">Ⅳ. 영업외손익</div>
       <table class="fs-tbl"><thead><tr><th>항목</th><th>비고</th><th style="width:160px">금액(원)</th></tr></thead><tbody>
-        ${FS_OTHER_INCOME_ACCTS.map(a => `<tr class="fs-item"><td>${a}</td><td style="font-size:11px;color:#888">영업외수익</td><td>${D('ledger_income:'+a, a, (d.otherIncMap||{})[a]||0)}</td></tr>`).join('')}
-        <tr class="fs-item"><td>영업외비용</td><td style="font-size:11px;color:#888">이자비용</td><td>${D('ledger_exp:이자비용','이자비용',d.interestExp)}</td></tr>
+        ${Object.entries(d.otherIncMap||{}).map(([a,v]) => `<tr class="fs-item"><td>${a}</td><td style="font-size:11px;color:#888">영업외수익</td><td>${D('ledger_income:'+a, a, v)}</td></tr>`).join('')}
+        ${Object.entries(d.nonOpExpMap||{}).length
+          ? Object.entries(d.nonOpExpMap).map(([a,v]) => `<tr class="fs-item"><td>${a}</td><td style="font-size:11px;color:#888">영업외비용</td><td>${D('ledger_exp:'+a, a, v)}</td></tr>`).join('')
+          : `<tr class="fs-item"><td>영업외비용</td><td style="font-size:11px;color:#888">해당 계정 없음</td><td>${fmtFS(0)}</td></tr>`}
         <tr class="fs-subtotal"><td colspan="2"><b>영업외손익 합계</b></td><td>${fmtFS(d.nonOp)}</td></tr>
       </tbody></table>
     </div>
@@ -5942,11 +5988,11 @@ function renderBS(d, forPrint=false) {
      ④ 단기차입금       - 금융기관 차입
   ─────────────────────────────────────────────────────── */
   const liabs = [
-    { label:'가수금',         sub:'지급건과 매칭 안 된 업체 입금',       val: d.bsSuspense,  key:'bs:suspense',        lbl:'가수금(미매칭 업체 입금)' },
+    { label:'가수금',         sub:'매칭 안 된 업체 입금 · 가수금/미분류 입금', val: d.bsSuspense,  key:'bs:suspense',        lbl:'가수금' },
     { label:'미지급금(대기)', sub:'대기(미검토) 상태 지출결의서',       val: d.bsUnpaid,    key:'expReq:unpaid',      lbl:'미지급금(대기)' },
     { label:'미지급금(승인)', sub:'승인 완료 · 지급 대기 지출결의서',   val: d.bsApproved,  key:'expReq:approved',    lbl:'미지급금(승인)' },
     { label:'외상매입금',     sub:'세금계산서 미완료 매입',             val: d.bsApTax,     key:'taxBuy:ALL',         lbl:'외상매입금' },
-    { label:'단기차입금',     sub:"계정과목 '단기차입금' 입금 합계",    val: d.bsShortLoan, key:'ledger_income:단기차입금', lbl:'단기차입금' },
+    { label:'차입금',         sub:"'차입금' 분류 계정 (차입 − 상환)",   val: d.bsShortLoan, key:'bs:loan',            lbl:'차입금' },
   ];
 
   /* ── 자본 항목 ────────────────────────────────────────
@@ -6016,7 +6062,7 @@ function renderBS(d, forPrint=false) {
               <tr class="fs-item">
                 <td style="padding-left:18px">자본금</td>
                 <td style="font-size:10.5px;color:#9ca3af">보통주자본금 누계</td>
-                <td>${D('ledger_income:보통주자본금','자본금', d.bsCapital)}</td>
+                <td>${D('bs:capital','자본금', d.bsCapital)}</td>
               </tr>
               ${d.bsDraw ? `
               <tr class="fs-item">
@@ -6129,23 +6175,23 @@ function renderTB(d, forPrint=false) {
     { grp:'자산', acct:'미수수수료',  side:'debit', amt:d.bsFeeAR,    key:'bs:feeAR',                  note:'발생 수수료 − 입금된 수수료' },
     { grp:'자산', acct:'미수수익',    side:'debit', amt:d.bsArTax,    key:'taxSale:ALL',               note:'세금계산서 미완료 매출' },
     // ── 부채 (대변) ──
-    { grp:'부채', acct:'가수금',         side:'credit', amt:d.bsSuspense,  key:'bs:suspense',             note:'매칭 안 된 업체 입금' },
+    { grp:'부채', acct:'가수금',         side:'credit', amt:d.bsSuspense,  key:'bs:suspense',             note:'매칭 안 된 업체 입금 · 가수금/미분류 입금' },
     { grp:'부채', acct:'미지급금(대기)', side:'credit', amt:d.bsUnpaid,    key:'expReq:unpaid',           note:'대기(미검토) 상태 지출결의서' },
     { grp:'부채', acct:'미지급금(승인)', side:'credit', amt:d.bsApproved,  key:'expReq:approved',         note:'승인 완료 · 지급 대기' },
     { grp:'부채', acct:'외상매입금',     side:'credit', amt:d.bsApTax,     key:'taxBuy:ALL',              note:'세금계산서 미완료 매입' },
-    { grp:'부채', acct:'단기차입금',     side:'credit', amt:d.bsShortLoan, key:'ledger_income:단기차입금', note:"계정과목 '단기차입금' 입금 합계" },
+    { grp:'부채', acct:'차입금',         side:'credit', amt:d.bsShortLoan, key:'bs:loan',                 note:"'차입금' 분류 계정 (차입 − 상환)" },
     // ── 자본 (대변) ──
-    { grp:'자본', acct:'자본금',                    side:'credit', amt:d.bsCapital,   key:'ledger_income:보통주자본금', note:'보통주자본금 누계' },
+    { grp:'자본', acct:'자본금',                    side:'credit', amt:d.bsCapital,   key:'bs:capital',                note:'자본금 분류 계정 누계' },
     { grp:'자본', acct:'전기이월 미처분이익잉여금',  side:'credit', amt:priorRetained, key:'',                           note:'당기 이전 누적 손익' },
     { grp:'자본', acct:'전기이월(수동입력)',        side:'credit', amt:d.bsCarryOver, key:'',                           note:'시스템 설정값' },
     { grp:'자본', acct:'인출금',                    side:'debit',  amt:d.bsDraw,      key:'bs:draw',                    note:'대표자 인출 누계 (자본 차감)' },
     // ── 수익 (대변, 당기 발생분 — 마감 전) ──
     { grp:'수익', acct:'수수료수입',  side:'credit', amt:d.totalRev, key:'fee:ALL',                  note:d.label+' 소개 수수료 (지급일 기준)' },
-    ...FS_OTHER_INCOME_ACCTS.map(a => ({ grp:'수익', acct:a, side:'credit', amt:(d.otherIncMap||{})[a]||0, key:'ledger_income:'+a, note:'영업외수익' })),
+    ...Object.entries(d.otherIncMap||{}).map(([a,v]) => ({ grp:'수익', acct:a, side:'credit', amt:v, key:'ledger_income:'+a, note:'영업외수익' })),
     // ── 비용 (차변, 당기 발생분 — 마감 전) ──
     { grp:'비용', acct:'매출원가',    side:'debit', amt:d.cogs,        key:'taxBuy:매입원가',     note:d.cogsNote },
     ...Object.entries(d.sgaMap).map(([k,v]) => ({ grp:'비용', acct:k, side:'debit', amt:v, key:`ledger_exp:${k}`, note:'판관비' })),
-    { grp:'비용', acct:'이자비용',    side:'debit', amt:d.interestExp, key:'ledger_exp:이자비용', note:'영업외비용' },
+    ...Object.entries(d.nonOpExpMap||{}).map(([a,v]) => ({ grp:'비용', acct:a, side:'debit', amt:v, key:'ledger_exp:'+a, note:'영업외비용' })),
   ].filter(r => Math.round(Number(r.amt)||0) !== 0);
 
   const totalDebit  = rows.filter(r=>r.side==='debit' ).reduce((s,r)=>s+Number(r.amt||0), 0);
@@ -6393,19 +6439,95 @@ function switchStab(el) {
   showAcctTab(map[tab] || tab);
 }
 const typeLabel={both:'공통',income:'입금',expense:'출금·카드'};
+const FS_CAT_HELP = {
+  sga:      '손익계산서 판매비와관리비. 출금은 비용, 같은 계정의 입금(환급)은 비용에서 차감됩니다. 예: 급여, 외주용역비, 통신비',
+  nonOpExp: '손익계산서 영업외비용. 예: 이자비용',
+  fee:      '손익계산서 수수료수입(매출). 간병비 없이 수수료만 들어온 입금. 출금(환불)은 차감됩니다.',
+  otherInc: '손익계산서 영업외수익. 예: 이자수익, 기타수입',
+  careAdv:  '재무상태표 대지급금(자산). 간병인에게 먼저 지급한 간병비 — 비용이 아닙니다.',
+  careRecv: '업체 입금(간병비+수수료). 외상매출금 매칭으로 간병비 몫(대지급금 회수)·수수료 몫·가수금으로 나뉩니다. 출금은 업체 환불로 가수금에서 차감됩니다.',
+  suspense: '재무상태표 가수금(부채). 정체를 확인하기 전 임시로 받아둔 입금. 출금은 가수금 정리(차감)입니다.',
+  loan:     '재무상태표 차입금(부채). 입금은 차입, 출금은 원금 상환(차감)입니다. 이자는 영업외비용 계정으로 따로 처리하세요.',
+  capital:  '재무상태표 자본금. 출자 입금.',
+  draw:     '재무상태표 인출금(자본 차감). 대표자 인출 — 비용이 아닙니다.',
+  mixed:    '출금은 판관비 "기타", 입금은 영업외수익으로 반영됩니다. 성격이 분명한 거래는 전용 계정을 쓰는 것이 좋습니다.',
+};
+function fillAcctFsOptions() {
+  const el = document.getElementById('aa-fs'); if(!el || el.options.length > 1) return;
+  el.innerHTML = '<option value="">선택하세요</option>' + Object.entries(FS_CATS).map(([k,c]) => `<option value="${k}">${c.grp} · ${c.label}</option>`).join('');
+}
+/* ── 이전 계정명 정리 (매출액→간병비회수, 외주비→외주용역비) ── */
+function planAcctRename() {
+  const plan = {};
+  Object.entries(ACCT_RENAME).forEach(([from, to]) => {
+    const c = {
+      to,
+      ledger:  ledger.filter(t => t.acct === from).length,
+      cards:   cards.filter(t => t.acct === from).length,
+      expReqs: expReqs.filter(t => t.acct === from).length,
+      rules:   rules.filter(r => r.a === from).length,
+      inList:  accts.some(a => a.name === from),
+    };
+    if(c.ledger || c.cards || c.expReqs || c.rules || c.inList) plan[from] = c;
+  });
+  return plan;
+}
+function renderAcctRenameBanner() {
+  const plan = planAcctRename(), keys = Object.keys(plan);
+  if(!keys.length) return '';
+  return `<div style="margin:10px;padding:10px 12px;background:#fff7ed;border:1px solid #fdba74;border-radius:8px;font-size:12.5px;color:#9a3412;line-height:1.7">
+    <b>이전 계정명 정리가 필요합니다</b> — 같은 계정이 두 이름으로 저장돼 있습니다.<br>
+    ${keys.map(f => { const p = plan[f]; return `· <b>${f}</b> → <b>${p.to}</b> : 입출금 ${p.ledger}건 · 카드 ${p.cards}건 · 지출결의서 ${p.expReqs}건 · 자동분류 규칙 ${p.rules}개${p.inList ? ' · 계정과목 목록' : ''}`; }).join('<br>')}
+    <div style="margin-top:6px"><button class="btn sm p" onclick="applyAcctRename()">계정명 정리 실행</button>
+    <span style="font-size:11px;color:#b45309;margin-left:6px">재무제표는 정리 전에도 두 이름을 같은 분류로 집계합니다</span></div>
+  </div>`;
+}
+function applyAcctRename() {
+  const plan = planAcctRename(), keys = Object.keys(plan);
+  if(!keys.length) { toast('정리할 이전 계정명이 없습니다.'); return; }
+  const msg = keys.map(f => { const p = plan[f]; return `• ${f} → ${p.to}
+   입출금 ${p.ledger}건 · 카드 ${p.cards}건 · 지출결의서 ${p.expReqs}건 · 자동분류 규칙 ${p.rules}개${p.inList ? ' · 계정과목 목록에서 정리' : ''}`; }).join('\n');
+  if(!confirm(`아래 이전 계정명을 현재 계정명으로 일괄 변경합니다.\n\n${msg}\n\n저장된 데이터가 바뀌며 되돌리기 어렵습니다. 진행할까요?`)) return;
+  const log = { _type:'acctRenameLog', at: new Date().toISOString(), items: {} };
+  keys.forEach(from => {
+    const to = ACCT_RENAME[from];
+    const ids = { ledger: [], cards: [], expReqs: [] };
+    ledger.filter(t => t.acct === from).forEach(t => { t.acct = to; fsSet(COL.ledger, t.id, t); ids.ledger.push(t.id); });
+    cards.filter(t => t.acct === from).forEach(t => { t.acct = to; fsSet(COL.cards, t.id, t); ids.cards.push(t.id); });
+    expReqs.filter(t => t.acct === from).forEach(t => { t.acct = to; fsSet(COL.expReqs, t.id, t); ids.expReqs.push(t.id); });
+    rules.forEach(r => { if(r.a === from) r.a = to; });
+    if(accts.some(a => a.name === from)) {
+      if(accts.some(a => a.name === to)) accts = accts.filter(a => a.name !== from);
+      else accts = accts.map(a => a.name === from ? { ...a, name: to, fs: FS_CAT_DEFAULT[to], color: FS_CATS[FS_CAT_DEFAULT[to]].color } : a);
+    }
+    log.items[from] = { to, ...ids };   // 변경된 문서 id 기록 (확인·복구용)
+  });
+  fsSet(COL.settings, 'rules', { _type:'rules', data: rules });
+  fsSet(COL.settings, 'accts', { _type:'accts', data: accts });
+  fsSet(COL.settings, 'acctRenameLog', log);
+  renderAcctList(); renderRuleList(); renderColorPrev(); syncDropdowns();
+  ['renderL','renderC','renderExp','renderDashboard'].forEach(f => { try { if(typeof window[f] === 'function') window[f](); } catch(e) {} });
+  toast(`계정명 정리 완료: ${keys.map(f => `${f}→${ACCT_RENAME[f]}`).join(', ')}`, 'ok');
+}
 function renderAcctList() {
   const el=document.getElementById('acct-list-wrap'); if(!el) return;
-  el.innerHTML=accts.length ? `<table width="100%"><thead><tr>
-    <th>계정과목</th><th style="width:90px;text-align:center">유형</th><th style="width:80px;text-align:center">색상</th><th style="width:72px;text-align:right">관리</th>
+  // 재무제표 분류 순서대로 정렬해서 표시 (저장 순서·인덱스는 그대로)
+  const catOrder = Object.keys(FS_CATS);
+  const order = accts.map((a,i)=>i).sort((x,y)=>{
+    const cx = catOrder.indexOf(acctCat(accts[x].name)), cy = catOrder.indexOf(acctCat(accts[y].name));
+    return (cx<0?99:cx) - (cy<0?99:cy) || x - y;
+  });
+  el.innerHTML=(renderAcctRenameBanner()) + (accts.length ? `<table width="100%"><thead><tr>
+    <th>계정과목</th><th style="width:90px;text-align:center">유형</th><th style="text-align:left">재무제표 분류</th><th style="width:72px;text-align:right">관리</th>
   </tr></thead><tbody>
-    ${accts.map((a,i)=>`<tr>
-      <td><span class="at ${a.color}">${a.name}</span></td>
+    ${order.map(i=>{ const a=accts[i]; const c=acctCat(a.name); return `<tr>
+      <td><span class="at ${acctColor(a.name)}">${a.name}</span></td>
       <td style="text-align:center;font-size:12px;color:var(--t3)">${typeLabel[a.type]||'공통'}</td>
-      <td style="text-align:center"><span class="at ${a.color}" style="font-size:10px;padding:1px 5px">${a.color}</span></td>
+      <td style="font-size:12px">${c ? `<span style="color:var(--t2)">${FS_CATS[c].grp} · ${FS_CATS[c].label}</span>` : '<span style="color:#c2410c;font-weight:600">⚠ 미지정</span>'}${ACCT_RENAME[a.name] ? ` <span style="color:#c2410c;font-size:11px">(이전 이름 → ${ACCT_RENAME[a.name]})</span>` : ''}</td>
       <td style="text-align:right"><button class="btn sm ic" onclick="openAcctEdit(${i})">✏</button> <button class="btn sm ic d" onclick="delAcct(${i})">🗑</button></td>
-    </tr>`).join('')}
+    </tr>`; }).join('')}
   </tbody></table>`
-  : `<div class="empty" style="padding:20px"><div class="empty-t" style="font-size:13px">계정과목이 없습니다</div></div>`;
+  : `<div class="empty" style="padding:20px"><div class="empty-t" style="font-size:13px">계정과목이 없습니다</div></div>`);
 }
 function renderRuleList() {
   const el=document.getElementById('rule-list-wrap'); if(!el) return;
@@ -6419,36 +6541,48 @@ function renderRuleList() {
 }
 function renderColorPrev() {
   const el=document.getElementById('color-prev');
-  if(el) el.innerHTML=accts.map(a=>`<span class="at ${a.color}">${a.name}</span>`).join('');
+  if(!el) return;
+  // 재무제표 분류별로 묶어서 색상 미리보기
+  el.innerHTML = Object.entries(FS_CATS).map(([k,c]) => {
+    const names = accts.filter(a => acctCat(a.name) === k);
+    return names.length ? `<div style="margin-bottom:8px"><div style="font-size:11px;color:var(--t3);margin-bottom:3px">${c.grp} · ${c.label}</div>${names.map(a=>`<span class="at ${c.color}">${a.name}</span>`).join(' ')}</div>` : '';
+  }).join('') + (accts.some(a=>!acctCat(a.name)) ? `<div><div style="font-size:11px;color:#c2410c;margin-bottom:3px">⚠ 분류 미지정</div>${accts.filter(a=>!acctCat(a.name)).map(a=>`<span class="at ${acctColor(a.name)}">${a.name}</span>`).join(' ')}</div>` : '');
 }
 function openAcctAdd() {
+  fillAcctFsOptions();
   document.getElementById('maa-title').textContent='계정과목 추가';
   document.getElementById('aa-idx').value=-1;
   document.getElementById('aa-name').value='';
   document.getElementById('aa-type').value='both';
-  document.getElementById('aa-color').value='ab6';
+  document.getElementById('aa-fs').value='';
   updateAcctPrev(); openMo('mo-acct-add');
 }
 function openAcctEdit(idx) {
   const a=accts[idx];
+  fillAcctFsOptions();
   document.getElementById('maa-title').textContent='계정과목 수정';
   document.getElementById('aa-idx').value=idx;
   document.getElementById('aa-name').value=a.name;
   document.getElementById('aa-type').value=a.type;
-  document.getElementById('aa-color').value=a.color;
+  document.getElementById('aa-fs').value=acctCat(a.name);
   updateAcctPrev(); openMo('mo-acct-add');
 }
 function updateAcctPrev() {
   const n=document.getElementById('aa-name').value||'계정과목';
-  const c=document.getElementById('aa-color').value||'ab6';
+  const fs=document.getElementById('aa-fs').value;
+  const c=fs ? FS_CATS[fs].color : 'ab6';
   const p=document.getElementById('aa-prev'); if(p){ p.textContent=n; p.className='at '+c; }
+  const h=document.getElementById('aa-fs-help'); if(h) h.textContent = fs ? FS_CAT_HELP[fs] : '재무제표에서 이 계정을 어디에 반영할지 선택하세요. 배지 색상은 분류에 따라 자동 지정됩니다.';
 }
-['aa-name','aa-color'].forEach(id=>{ const el=document.getElementById(id); if(el) el.addEventListener('input',updateAcctPrev); });
+['aa-name','aa-fs'].forEach(id=>{ const el=document.getElementById(id); if(el) el.addEventListener('input',updateAcctPrev); });
 function saveAcct() {
   const idx=parseInt(document.getElementById('aa-idx').value);
   const name=document.getElementById('aa-name').value.trim();
   if(!name){ toast('계정과목명을 입력하세요.','err'); return; }
-  const obj={name,type:document.getElementById('aa-type').value,color:document.getElementById('aa-color').value};
+  const fs=document.getElementById('aa-fs').value;
+  if(!fs){ toast('재무제표 분류를 선택하세요.','err'); return; }
+  if(accts.some((a,i)=>a.name===name && i!==idx)){ toast('이미 있는 계정과목입니다.','err'); return; }
+  const obj={name,type:document.getElementById('aa-type').value,fs,color:FS_CATS[fs].color};
   if(idx>=0) accts[idx]=obj; else accts.push(obj);
   fsSet(COL.settings,'accts',{_type:'accts',data:accts});
   closeMo('mo-acct-add'); renderAcctList(); renderColorPrev(); syncDropdowns();
