@@ -1378,7 +1378,7 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
 <script>
 // ─── 앱 버전 / 새 버전 감지 ───
 // 배포마다 이 값과 저장소 루트의 version.txt를 같은 값으로 올려야 함 (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_06_03';
+const APP_BUILD = '26_10_07_01';
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
     .then(r => r.ok ? r.text() : null)
@@ -1677,6 +1677,10 @@ let bankPvw=[], taxPvw=[], cardPvw=[];
 let taxUpMode='sale';
 let tmpKws=[];
  
+/* (26_10_07_01) 우리가 지급한 건의 '간병비 입금'·'명절할증 입금' 문구 → '지급' (지출결의서·출금 내역용) */
+function payWordFix(s) {
+  return (typeof s === 'string') ? s.replace(/(간병비|명절할증)(\s*)입금/g, '$1$2지급') : s;
+}
 /* ═══════ FIREBASE CRUD 헬퍼 ═══════ */
  
 /* 문서 저장 */
@@ -1810,6 +1814,18 @@ async function initApp() {
       stMig.wageToCareAdvCount = { expReqs: conv.length, ledger: convLed.length };
       fsSet(COL.settings, 'migrations', stMig);
       if(conv.length) setTimeout(() => toast(`지출결의서 급여 ${conv.length}건 → 간병비선지급으로 변경 완료`, 'ok'), 800);
+    }
+    // (26_10_07_01) '간병비 입금'·'명절할증 입금' → '지급' 1회 변환 — 지출결의서 전체 + 입출금 출금건만 (업체 입금건은 그대로)
+    if(!stMig.careInToPay) {
+      const fixFields = (o, keys) => { let ch = false; keys.forEach(k => { const v = payWordFix(o[k]); if(v !== o[k]) { o[k] = v; ch = true; } }); return ch; };
+      const expFix = expReqs.filter(t => fixFields(t, ['title','desc','note']));
+      expFix.forEach(t => fsSet(COL.expReqs, t.id, t));
+      const ledFix = ledger.filter(l => l.type === 'expense' && fixFields(l, ['desc','note']));
+      ledFix.forEach(l => fsSet(COL.ledger, l.id, l));
+      stMig.careInToPay = new Date().toISOString();
+      stMig.careInToPayCount = { expReqs: expFix.length, ledger: ledFix.length };
+      fsSet(COL.settings, 'migrations', stMig);
+      if(expFix.length || ledFix.length) setTimeout(() => toast(`'간병비 입금' → '간병비 지급' 변경 완료 (지출결의서 ${expFix.length}건 · 입출금 ${ledFix.length}건)`, 'ok'), 1600);
     }
     if(stSys) {
       const s = stSys;
@@ -2329,11 +2345,12 @@ function openLAdd(id) {
 function saveL() {
   const date=document.getElementById('lf-date').value,
         amount=parseFloat(document.getElementById('lf-amount').value)||0,
-        desc=document.getElementById('lf-desc').value.trim();
+        iotype=document.getElementById('lf-iotype').value,
+        desc=(iotype==='expense' ? payWordFix : (x=>x))(document.getElementById('lf-desc').value.trim());
   if(!date||!amount||!desc){ toast('날짜, 금액, 내용은 필수입니다.','err'); return; }
   const acct = document.getElementById('lf-acct').value||autoClassify(desc);
   const partner = isCareDepAcct(acct) ? (document.getElementById('lf-partner')?.value||'') : '';
-  const obj={date,type:document.getElementById('lf-iotype').value,amount,
+  const obj={date,type:iotype,amount,
     balance:parseFloat(document.getElementById('lf-balance').value)||0,
     desc, acct,
     bank:document.getElementById('lf-bank').value,
@@ -3592,10 +3609,10 @@ function openExpCopy(id) {
 function saveExp() {
   const draftDate = document.getElementById('ef-draft-date').value;
   const payDate   = document.getElementById('ef-pay-date').value;
-  const title     = document.getElementById('ef-title').value.trim();
+  const title     = payWordFix(document.getElementById('ef-title').value.trim());
   const payee     = document.getElementById('ef-payee').value.trim();
   const amount    = parseFloat(document.getElementById('ef-amount').value)||0;
-  const desc      = document.getElementById('ef-desc').value.trim();
+  const desc      = payWordFix(document.getElementById('ef-desc').value.trim());
   if(!draftDate||!payDate||!title||!payee||!amount||!desc){
     toast('기안일자·지급일자·제목·수취인·금액·지출내용은 필수입니다.','err'); return;
   }
@@ -4971,7 +4988,7 @@ function renderExpMatch() {
       </table></div>
       ${matchUnmatchedFiltered.length ? `
       <div style="padding:10px 14px;font-size:12px;color:var(--O);background:#FFF7ED;border-top:1px solid var(--bd)">
-        ⚠ 제목에서 환자명을 인식하지 못한 지급건 ${matchUnmatchedFiltered.length}건이 있습니다. 제목을 <b>간병비 입금(환자: 이름)</b> 형식으로 입력하면 자동으로 대조됩니다.
+        ⚠ 제목에서 환자명을 인식하지 못한 지급건 ${matchUnmatchedFiltered.length}건이 있습니다. 제목을 <b>간병비 지급(환자: 이름)</b> 형식으로 입력하면 자동으로 대조됩니다.
         <br>${matchUnmatchedFiltered.map(t=>`「${t.title}」`).join(', ')}
       </div>` : ''}
       <div style="padding:8px 14px;font-size:11.5px;color:var(--t3);border-top:1px solid var(--bd)">
