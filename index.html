@@ -1387,7 +1387,7 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
 <script>
 // ─── 앱 버전 / 새 버전 감지 ───
 // 배포마다 이 값과 저장소 루트의 version.txt를 같은 값으로 올려야 함 (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_12_01';
+const APP_BUILD = '26_10_12_02';
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
     .then(r => r.ok ? r.text() : null)
@@ -1884,6 +1884,9 @@ async function initApp() {
     if(!baSnap.length) {
       await fsSet(COL.bankAccs, 1, bankAccs[0]);
     }
+
+    /* (26_10_12_02) HR 대시보드에서 새로 등록하는 지출결의서 감시 → 새로고침 안내 배너 */
+    startHrExpWatch();
  
   } catch(e) {
     console.error('initApp error:', e);
@@ -1909,6 +1912,42 @@ async function initApp() {
   }
 }
  
+/* ═══════ (26_10_12_02) HR 연동 지출결의서 ═══════
+   HR(간병인 구인 관리) 대시보드의 '📤 지출결의서 등록' 버튼이 이 앱의 expReqs에 '대기' 상태로 직접 저장함.
+   HR 건 표시: src:'hr' / hrKey(간병인|지급일|라벨 고유키, HR 쪽 중복 방지용) / hrRegAt(등록 시각 ISO)
+   - 목록·상세·모바일 카드에 'HR연동' 배지
+   - 앱을 연 뒤 HR에서 새로 등록된 건이 생기면 상단 배너로 새로고침 안내 (자동 새로고침은 작성 중인 내용이 날아갈 수 있어 하지 않음)
+   - 수정·승인·지급완료·삭제는 일반 지출결의서와 똑같음. 삭제하면 HR 쪽에서 다시 등록할 수 있게 됨 */
+const isHrExp = t => !!(t && (t.src === 'hr' || t.hrKey));
+const hrExpBadge = t => isHrExp(t) ? '<span class="badge" style="background:#E0F2F1;color:#00796B;margin-left:4px;vertical-align:1px" title="HR 대시보드에서 등록된 지출결의서">HR연동</span>' : '';
+let _hrExpUnsub = null;
+function startHrExpWatch() {
+  if(_hrExpUnsub || !db) return;
+  // 두 PC의 시계 차이를 감안해 10분 전부터 감시하고, 이미 불러온 건(id)은 제외
+  const since = new Date(Date.now() - 10*60*1000).toISOString();
+  try {
+    _hrExpUnsub = db.collection(COL.expReqs).where('hrRegAt', '>', since).onSnapshot(snap => {
+      const known = new Set(expReqs.map(t => String(t.id)));
+      const fresh = snap.docs.map(d => d.data()).filter(x => x && !known.has(String(x.id)));
+      showHrExpBanner(fresh);
+    }, err => { console.warn('HR 지출결의서 감시 실패:', err); });
+  } catch(e) { console.warn('HR 지출결의서 감시 시작 실패:', e); }
+}
+function showHrExpBanner(list) {
+  let el = document.getElementById('hr-exp-banner');
+  if(!list.length) { if(el) el.remove(); return; }
+  if(!el) {
+    el = document.createElement('div');
+    el.id = 'hr-exp-banner';
+    el.style.cssText = 'position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:9000;max-width:calc(100vw - 24px);background:#FEF3C7;border:1px solid #F59E0B;color:#78350F;border-radius:10px;padding:9px 12px;box-shadow:0 6px 18px rgba(0,0,0,.15);display:flex;align-items:center;gap:10px;font-size:13px;font-weight:600';
+    document.body.appendChild(el);
+  }
+  const sum = list.reduce((a,x)=>a+(Number(x.amount)||0),0);
+  el.innerHTML = '<span>🔔 HR에서 새 지출결의서 <b>' + list.length + '건</b>(' + sum.toLocaleString('ko-KR') + '원)이 등록됐어요. 새로고침해 주세요.</span>'
+    + '<button class="btn sm p" style="flex-shrink:0" onclick="location.reload()">새로고침</button>'
+    + '<button class="btn sm ic" style="flex-shrink:0" title="닫기" onclick="this.parentNode.remove()">✕</button>';
+}
+
 /* ═══════ HELPERS ═══════ */
 const fmt  = n => (n===null||n===undefined||n==='')?'-':Number(n).toLocaleString('ko-KR');
 const fmtS = n => {
@@ -3942,7 +3981,7 @@ function openExpView(id) {
     <div style="padding:2px 0 14px">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
         <span class="badge ${sc}" style="font-size:12px;padding:3px 10px">${t.status}</span>
-        <span style="font-size:18px;font-weight:700">${t.title}</span>
+        <span style="font-size:18px;font-weight:700">${t.title}${hrExpBadge(t)}</span>
       </div>
       <div class="ev-row"><span class="ev-label">기안일자</span><span class="ev-val">${t.draftDate}</span></div>
       <div class="ev-row"><span class="ev-label">지급일자</span><span class="ev-val" style="color:var(--R);font-weight:700">${t.payDate}</span></div>
@@ -5297,7 +5336,7 @@ function renderExp() {
   if(tb) tb.innerHTML=rows.map(t=>`<tr>
     <td class="dn" style="color:var(--R);font-weight:600">${t.payDate}</td>
     <td class="dn">${t.draftDate}</td>
-    <td><div style="overflow-wrap:break-word;word-break:keep-all;line-height:1.4;font-size:12.5px;font-weight:500;cursor:pointer" onclick="openExpView(${t.id})">${t.title}</div></td>
+    <td><div style="overflow-wrap:break-word;word-break:keep-all;line-height:1.4;font-size:12.5px;font-weight:500;cursor:pointer" onclick="openExpView(${t.id})">${t.title}${hrExpBadge(t)}</div></td>
     <td style="font-size:12px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.payee}</td>
     <td><span class="at ${acctColor(t.acct)}">${t.acct||'미분류'}</span></td>
     <td class="nm exp">${fmt(t.amount)}</td>
@@ -5310,7 +5349,7 @@ function renderExp() {
     </td>
   </tr>`).join('');
   if(ca) ca.innerHTML=rows.map(t=>`<div class="txc" onclick="openExpView(${t.id})" style="cursor:pointer">
-    <div class="txc-tp"><div class="txc-d">${t.title}</div><div class="txc-a exp">-${fmtS(t.amount)}</div></div>
+    <div class="txc-tp"><div class="txc-d">${t.title}${hrExpBadge(t)}</div><div class="txc-a exp">-${fmtS(t.amount)}</div></div>
     <div style="font-size:11.5px;color:var(--t3);margin:-3px 0 6px">${t.payee}</div>
     <div class="txc-bt">
       <span class="txc-dt" style="color:var(--R)">지급 ${t.payDate}</span>
@@ -5340,7 +5379,7 @@ function renderExpToday() {
   const makeStatusBadge=s=>`<span class="badge ${expStatusClass[s]||'est-wait'}">${s}</span>`;
   if(tb) tb.innerHTML=rows.map(t=>`<tr style="background:var(--RL)">
     <td class="dn" style="color:var(--R);font-weight:700">${t.payDate}</td>
-    <td style="font-size:12.5px;font-weight:500;cursor:pointer" onclick="openExpView(${t.id})">${t.title}</td>
+    <td style="font-size:12.5px;font-weight:500;cursor:pointer" onclick="openExpView(${t.id})">${t.title}${hrExpBadge(t)}</td>
     <td style="font-size:12px">${t.payee}</td>
     <td><span class="at ${acctColor(t.acct)}">${t.acct||'미분류'}</span></td>
     <td class="nm exp">${fmt(t.amount)}</td>
@@ -5348,7 +5387,7 @@ function renderExpToday() {
     <td><button class="btn sm p" onclick="changeExpStatus(${t.id},'지급완료')">💰 지급</button></td>
   </tr>`).join('');
   if(ca) ca.innerHTML=rows.map(t=>`<div class="txc" style="border-left:3px solid var(--R);cursor:pointer" onclick="openExpView(${t.id})">
-    <div class="txc-tp"><div class="txc-d">${t.title}</div><div class="txc-a exp">-${fmtS(t.amount)}</div></div>
+    <div class="txc-tp"><div class="txc-d">${t.title}${hrExpBadge(t)}</div><div class="txc-a exp">-${fmtS(t.amount)}</div></div>
     <div style="font-size:11.5px;color:var(--t3);margin:-3px 0 6px">${t.payee}</div>
     <div class="txc-bt">
       ${makeStatusBadge(t.status)}
