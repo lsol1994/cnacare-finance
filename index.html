@@ -1387,7 +1387,7 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
 <script>
 // ─── 앱 버전 / 새 버전 감지 ───
 // 배포마다 이 값과 저장소 루트의 version.txt를 같은 값으로 올려야 함 (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_12_02';
+const APP_BUILD = '26_10_12_03';
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
     .then(r => r.ok ? r.text() : null)
@@ -4129,7 +4129,7 @@ function computeARMatching() {
     const key = patient
       ? `${patientMatchKey(patient)}|${caregiverMatchKey(t.payee)}`
       : `__UNMATCHED__${t.id}`; // 환자명 미인식 건은 서로 합산되지 않도록 건별 고유 키 사용
-    if(!groups[key]) groups[key] = { patient, caregiver: (t.payee||'').trim(), expectedTotal:0, payCount:0, payIds:[], payDates:[], receivedTotal:0, recvCount:0, recvDates:[], recvRows:[] };
+    if(!groups[key]) groups[key] = { patient, caregiver: (t.payee||'').trim(), expectedTotal:0, payCount:0, payIds:[], payDates:[], receivedTotal:0, recvCount:0, recvDates:[], recvRows:[], refundTotal:0, refundCount:0, refundRows:[] };
     groups[key].expectedTotal += Number(t.expectedRev||0);
     groups[key].payCount += 1;
     groups[key].payIds.push(t.id);
@@ -4139,10 +4139,10 @@ function computeARMatching() {
   // 매칭 안 된(제목에서 환자명을 못 뽑은) 건은 별도 표시를 위해 unmatched 리스트도 유지
   const unmatchedPay = payReqs.filter(t => !extractPatientName(t.title));
 
-  // 입금 내역을 이름쌍(양방향)으로 매칭 — 환자명은 영문 앞5자, 간병인명은 한글 우선 규칙 적용
-  incomeRows.forEach(t => {
-    const pair = extractLedgerNamePair(t.desc);
-    if(!pair) return;
+  // 입출금 내용의 이름쌍(양방향)으로 그룹 찾기 — 환자명은 영문 앞5자, 간병인명은 한글 우선 규칙 적용
+  const findGroupByDesc = desc => {
+    const pair = extractLedgerNamePair(desc);
+    if(!pair) return null;
     const [raw1, raw2] = pair;
     // raw1을 환자, raw2를 간병인으로 가정한 키와, 반대 방향 키를 모두 준비해 양방향 매칭
     const p1 = patientMatchKey(raw1), c2 = caregiverMatchKey(raw2);
@@ -4153,20 +4153,40 @@ function computeARMatching() {
       const gp = patientMatchKey(g.patient), gc = caregiverMatchKey(g.caregiver);
       if((gp===p1 && gc===c2) || (gp===p2 && gc===c1)) matched = g;
     });
+    return matched;
+  };
+
+  const groupByIncomeId = {}; // 입금건 id -> 그룹 (환불 출금 연결용)
+  incomeRows.forEach(t => {
+    const matched = findGroupByDesc(t.desc);
     if(matched) {
       matched.receivedTotal += Number(t.amount||0);
       matched.recvCount += 1;
       matched.recvDates.push(t.date);
       matched.recvRows.push(t);
+      groupByIncomeId[String(t.id)] = matched;
     }
   });
 
+  // 업체에 돌려준 출금(과입금·오입금 반환)은 해당 그룹 입금액에서 차감
+  //  ① 오입금 의심 → "환불완료"로 연결된 출금(refundForId): 연결된 입금건의 그룹
+  //  ② 간병비회수 분류 계정으로 등록한 출금: 내용의 환자-간병인 이름쌍으로 그룹 매칭
+  ledger.filter(t => t.type==='expense' && (t.refundForId != null || isCareDepAcct(t.acct))).forEach(t => {
+    let g = t.refundForId != null ? (groupByIncomeId[String(t.refundForId)] || null) : null;
+    if(!g) g = findGroupByDesc(t.desc);
+    if(!g) return;
+    g.refundTotal += Number(t.amount||0);
+    g.refundCount += 1;
+    g.refundRows.push(t);
+  });
+
   const rows = Object.values(groups).map(g => {
-    const diff = g.expectedTotal - g.receivedTotal;
+    const netReceived = g.receivedTotal - g.refundTotal; // 실 입금액 = 입금 − 반환
+    const diff = g.expectedTotal - netReceived;
     let status = '미입금';
-    if(g.receivedTotal >= g.expectedTotal && g.expectedTotal>0) status = '완납';
-    else if(g.receivedTotal > 0) status = '부분입금';
-    return { ...g, diff, status, lastRecvDate: g.recvDates.sort().slice(-1)[0]||'' };
+    if(netReceived >= g.expectedTotal && g.expectedTotal>0) status = '완납';
+    else if(netReceived > 0) status = '부분입금';
+    return { ...g, netReceived, diff, status, lastRecvDate: g.recvDates.sort().slice(-1)[0]||'' };
   }).sort((a,b) => (b.diff) - (a.diff));
 
   return { rows, unmatchedPay, totalExpected: payReqs.reduce((s,t)=>s+Number(t.expectedRev||0),0), totalReceived: incomeRows.reduce((s,t)=>s+Number(t.amount||0),0) };
@@ -4215,19 +4235,28 @@ function computeSuspiciousDeposits() {
   });
 
   // ③ 그룹별 초과입금분 (그룹 내 입금을 날짜순으로 누적해 예상매출액을 넘는 부분만 산출)
+  // 이미 업체에 반환한 금액(refundTotal)만큼은 초과분에서 빼고 판정 (반환 끝난 과입금이 다시 의심으로 뜨지 않도록)
   arGroups.forEach(g => {
-    if(!(g.expectedTotal>0 && g.receivedTotal > g.expectedTotal)) return;
+    const limit = g.expectedTotal + (g.refundTotal||0);
+    if(!(g.expectedTotal>0 && g.receivedTotal > limit)) return;
     const sorted = [...g.recvRows].sort((a,b) => (a.date||'').localeCompare(b.date||'') || String(a.id).localeCompare(String(b.id)));
     let cum = 0;
     sorted.forEach(t => {
       const before = cum;
       cum += Number(t.amount||0);
-      if(before >= g.expectedTotal) {
+      if(before >= limit) {
         list.push(mk(t, '초과입금', `${g.patient} - ${g.caregiver} 건은 예상매출액을 이미 채운 뒤 추가로 입금되었습니다.`, t.amount));
-      } else if(cum > g.expectedTotal) {
-        list.push(mk(t, '초과입금(부분)', `${g.patient} - ${g.caregiver} 건 예상매출액(${fmt(g.expectedTotal)}원)을 ${fmt(cum - g.expectedTotal)}원 초과했습니다.`, cum - g.expectedTotal));
+      } else if(cum > limit) {
+        list.push(mk(t, '초과입금(부분)', `${g.patient} - ${g.caregiver} 건 예상매출액(${fmt(g.expectedTotal)}원)${g.refundTotal?`과 반환액(${fmt(g.refundTotal)}원)`:''}을 ${fmt(cum - limit)}원 초과했습니다.`, cum - limit));
       }
     });
+  });
+
+  // 환불완료로 연결된 입금건은 반환 차감으로 더 이상 초과 판정되지 않더라도 "확인 처리된 항목" 이력에 남김
+  const listed = new Set(list.map(x => String(x.id)));
+  ledger.filter(t => t.type==='income' && isCareDepAcct(t.acct) && t.arResolution==='환불완료' && !listed.has(String(t.id))).forEach(t => {
+    const refundTx = t.arRefundTxId != null ? ledger.find(l => l.id == t.arRefundTxId) : null;
+    list.push(mk(t, '초과입금(반환됨)', '업체에 반환 처리된 과입금 건입니다.', refundTx ? refundTx.amount : t.amount));
   });
 
   return list.sort((a,b) => (b.date||'').localeCompare(a.date||''));
@@ -5200,7 +5229,7 @@ function renderExpMatch() {
           <th style="width:60px;text-align:center">지급건수</th>
           <th style="width:120px;text-align:right">지급 예상매출액(원)</th>
           <th style="width:60px;text-align:center">입금건수</th>
-          <th style="width:120px;text-align:right">실 입금액(원)</th>
+          <th style="width:130px;text-align:right" title="업체 입금 − 업체에 반환한 출금">실 입금액(원)</th>
           <th style="width:100px;text-align:right">차액(원)</th>
           <th style="width:90px">최근 입금일</th>
           <th style="width:76px;text-align:center">상태</th>
@@ -5213,7 +5242,7 @@ function renderExpMatch() {
               <td style="text-align:center">${g.payCount}</td>
               <td class="nm" style="color:var(--P);font-weight:600">${fmt(g.expectedTotal)}</td>
               <td style="text-align:center">${g.recvCount}</td>
-              <td class="nm inc">${fmt(g.receivedTotal)}</td>
+              <td class="nm inc"${g.refundTotal ? ` title="${(g.refundRows||[]).map(r=>`반환 ${r.date} ₩${fmt(r.amount)} · ${(r.desc||'').replace(/"/g,'&quot;')}`).join('\n')}"` : ''}>${fmt(g.netReceived)}${g.refundTotal ? `<div style="font-size:10.5px;font-weight:400;color:var(--t3);white-space:nowrap">입금 ${fmt(g.receivedTotal)} − 반환 ${fmt(g.refundTotal)}</div>` : ''}</td>
               <td class="nm" style="color:${g.diff>0?'var(--R)':'var(--G)'};font-weight:700">${fmt(g.diff)}</td>
               <td class="dn">${g.lastRecvDate||'-'}</td>
               <td style="text-align:center"><span style="font-weight:700;color:${matchStatusColor[g.status]}">${g.status}</span></td>
@@ -5226,7 +5255,7 @@ function renderExpMatch() {
         <br>${matchUnmatchedFiltered.map(t=>`「${t.title}」`).join(', ')}
       </div>` : ''}
       <div style="padding:8px 14px;font-size:11.5px;color:var(--t3);border-top:1px solid var(--bd)">
-        매칭 방식: 지출결의서 제목의 <b>환자명</b>과 수취인(<b>간병인명</b>)을, 입출금 내역 간병비회수 계정의 내용(예: 타행IB 환자명-간병인명)에서 추출한 이름과 대조합니다. 검색 필터는 표시 대상만 좁힐 뿐, 지급·입금 합계는 항상 전체 기간 기준으로 정확히 매칭됩니다.
+        매칭 방식: 지출결의서 제목의 <b>환자명</b>과 수취인(<b>간병인명</b>)을, 입출금 내역 간병비회수 계정의 내용(예: 타행IB 환자명-간병인명)에서 추출한 이름과 대조합니다. 업체에 돌려준 출금(오입금 의심에서 <b>환불완료</b>로 연결한 출금, 또는 간병비회수 계정 출금 중 내용에 환자명-간병인명이 있는 건)은 실 입금액에서 차감합니다. 검색 필터는 표시 대상만 좁힐 뿐, 지급·입금 합계는 항상 전체 기간 기준으로 정확히 매칭됩니다.
       </div>
     </div>`;
 
@@ -5441,8 +5470,8 @@ function arExport(fmt2) {
     toast('내보낼 데이터가 없습니다.','err'); return;
   }
 
-  const matchHdr = ['환자명','간병인명(수취인)','지급건수','지급 예상매출액(원)','입금건수','실입금액(원)','차액(원)','최근입금일','상태'];
-  const matchData = matchRows.map(g => [g.patient||'(미확인)', g.caregiver, g.payCount, g.expectedTotal, g.recvCount, g.receivedTotal, g.diff, g.lastRecvDate||'', g.status]);
+  const matchHdr = ['환자명','간병인명(수취인)','지급건수','지급 예상매출액(원)','입금건수','입금액(원)','반환액(원)','실입금액(원)','차액(원)','최근입금일','상태'];
+  const matchData = matchRows.map(g => [g.patient||'(미확인)', g.caregiver, g.payCount, g.expectedTotal, g.recvCount, g.receivedTotal, g.refundTotal||0, g.netReceived, g.diff, g.lastRecvDate||'', g.status]);
 
   const payHdr = ['지급일자','기안일자','제목','환자명(추출)','수취인(간병인)','간병일수','수수료(원)','지급금액(원)','예상매출액(원)','업체','상태'];
   const payData = payReqs.map(t => [t.payDate, t.draftDate, t.title, extractPatientName(t.title)||'', t.payee, t.careDays||'', Number(t.careDays||0)*5000, t.amount, t.expectedRev||0, t.client||'', t.status]);
@@ -5490,7 +5519,7 @@ function arExport(fmt2) {
   } else {
     const wb = XLSX.utils.book_new();
     const ws1 = XLSX.utils.aoa_to_sheet([matchHdr, ...matchData]);
-    ws1['!cols'] = [{wch:12},{wch:14},{wch:10},{wch:16},{wch:10},{wch:14},{wch:12},{wch:12},{wch:10}];
+    ws1['!cols'] = [{wch:12},{wch:14},{wch:10},{wch:16},{wch:10},{wch:14},{wch:12},{wch:14},{wch:12},{wch:12},{wch:10}];
     XLSX.utils.book_append_sheet(wb, ws1, '입금대조요약');
 
     const wsYM = XLSX.utils.aoa_to_sheet([yrMoHdr, ...yrMoData]);
