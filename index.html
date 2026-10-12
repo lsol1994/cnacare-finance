@@ -354,6 +354,15 @@ tbody tr:hover td{background:var(--PU)}
 tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--sf2);border-top:2px solid var(--bds)}
 .nm-s{font-family:'JetBrains Mono',monospace;font-weight:700;text-align:right;white-space:nowrap;font-size:12.5px}
 @media(max-width:860px){ #db-two-col{grid-template-columns:1fr} }
+/* (26_10_12_01) 은행명 자동완성 */
+.bk-wrap{position:relative}
+.bk-dd{position:absolute;left:0;right:0;top:100%;margin-top:3px;background:var(--sf);border:1px solid var(--bd);border-radius:var(--r2);box-shadow:var(--sh1);z-index:50;max-height:236px;overflow-y:auto;display:none}
+.bk-dd.open{display:block}
+.bk-dd-h{font-size:10.5px;color:var(--t3);padding:6px 10px 3px;font-weight:600}
+.bk-it{display:flex;justify-content:space-between;align-items:center;padding:7px 10px;font-size:13px;cursor:pointer}
+.bk-it:hover,.bk-it.on{background:var(--PU)}
+.bk-it .bk-cd{font-size:11px;color:var(--t3);font-variant-numeric:tabular-nums}
+.bk-hint.warn{color:var(--R)}
 </style>
 </head>
 <body>
@@ -1231,7 +1240,7 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
       <div class="fg"><label class="fl">계정과목</label><select class="fc" id="ef-acct" onchange="onExpAcctChange()"></select></div>
       <div class="fg"><label class="fl">지급금액(원) *</label><input type="number" class="fc" id="ef-amount" placeholder="0" oninput="calcExpectedRev()"></div>
       <div class="fg"><label class="fl">지급방법</label><select class="fc" id="ef-method"><option>계좌이체</option><option>현금</option><option>카드</option><option>수표</option></select></div>
-      <div class="fg"><label class="fl">은행명</label><input type="text" class="fc" id="ef-bank" placeholder="신한은행"></div>
+      <div class="fg"><label class="fl">은행명</label><div class="bk-wrap"><input type="text" class="fc" id="ef-bank" placeholder="예: 농협, 국민, 하나" autocomplete="off" oninput="bankInput(this)" onkeydown="bankKey(event,this)" onblur="bankBlur(this)" onfocus="bankInput(this,true)"><div class="bk-dd" id="ef-bank-dd"></div></div><div class="fh bk-hint" id="ef-bank-hint"></div></div>
       <div class="fg"><label class="fl">계좌번호</label><input type="text" class="fc" id="ef-account" placeholder="000-000-000000"></div>
       <div class="fg full"><label class="fl">지출 내용 *</label><textarea class="fc" id="ef-desc" rows="3" placeholder="지출 내용을 구체적으로 입력하세요" style="resize:vertical"></textarea></div>
       <div class="fg"><label class="fl">상태</label><select class="fc" id="ef-status"><option value="대기">대기</option><option value="승인">승인</option><option value="지급완료">지급완료</option><option value="반려">반려</option></select></div>
@@ -1378,7 +1387,7 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
 <script>
 // ─── 앱 버전 / 새 버전 감지 ───
 // 배포마다 이 값과 저장소 루트의 version.txt를 같은 값으로 올려야 함 (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_07_01';
+const APP_BUILD = '26_10_12_01';
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
     .then(r => r.ok ? r.text() : null)
@@ -1826,6 +1835,32 @@ async function initApp() {
       stMig.careInToPayCount = { expReqs: expFix.length, ledger: ledFix.length };
       fsSet(COL.settings, 'migrations', stMig);
       if(expFix.length || ledFix.length) setTimeout(() => toast(`'간병비 입금' → '간병비 지급' 변경 완료 (지출결의서 ${expFix.length}건 · 입출금 ${ledFix.length}건)`, 'ok'), 1600);
+    }
+    // (26_10_12_01) 지출결의서 은행명 표준화 1회 실행 — '농협'·'농협은행' 등 → 표준 은행명 + 은행코드 (연동 입출금의 은행 표기도 같이)
+    if(!stMig.bankNorm) {
+      const log = [];
+      expReqs.forEach(t => {
+        const raw = String(t.bank||'').trim(); if(!raw) return;
+        const r = bankResolve(raw);
+        const b = r.match || (r.cands.length ? r.cands[0] : null);   // 애매한 기존 값은 1순위(은행)로
+        if(!b || (t.bank === b.name && t.bankCode === b.code)) return;
+        const oldLedName = expLedgerBankName(t);
+        t.bank = b.name; t.bankCode = b.code;
+        fsSet(COL.expReqs, t.id, t);
+        const newLedName = expLedgerBankName(t);
+        let led = 0;
+        ledger.forEach(l => {
+          if(l.linkedExpId && String(l.linkedExpId) === String(t.id) && l.bank === oldLedName && oldLedName !== newLedName) {
+            l.bank = newLedName; fsSet(COL.ledger, l.id, l); led++;
+          }
+        });
+        log.push({ id: t.id, from: raw, to: b.name, code: b.code, ambiguous: !r.match, ledger: led });
+      });
+      stMig.bankNorm = new Date().toISOString();
+      stMig.bankNormCount = { expReqs: log.length, ledger: log.reduce((a,x)=>a+x.ledger,0), ambiguous: log.filter(x=>x.ambiguous).length };
+      stMig.bankNormLog = log;
+      fsSet(COL.settings, 'migrations', stMig);
+      if(log.length) setTimeout(() => toast(`지출결의서 은행명 ${log.length}건 표준화 완료`, 'ok'), 2400);
     }
     if(stSys) {
       const s = stSys;
@@ -3548,7 +3583,7 @@ function openExpAdd(id) {
   document.getElementById('ef-bizno').value      = t ? t.bizno  : '';
   document.getElementById('ef-amount').value     = t ? t.amount : '';
   document.getElementById('ef-method').value     = t ? t.method : '계좌이체';
-  document.getElementById('ef-bank').value       = t ? t.bank   : '';
+  bankSetField(t ? t.bank : '', t ? t.bankCode : '');
   document.getElementById('ef-account').value    = t ? t.account: '';
   document.getElementById('ef-desc').value       = t ? t.desc   : '';
   document.getElementById('ef-status').value     = t ? t.status : '대기';
@@ -3584,7 +3619,7 @@ function openExpCopy(id) {
   document.getElementById('ef-bizno').value      = t.bizno  || '';
   document.getElementById('ef-amount').value     = t.amount;
   document.getElementById('ef-method').value     = t.method || '계좌이체';
-  document.getElementById('ef-bank').value       = t.bank   || '';
+  bankSetField(t.bank || '', t.bankCode || '');
   document.getElementById('ef-account').value    = t.account|| '';
   document.getElementById('ef-desc').value       = t.desc;
   document.getElementById('ef-status').value     = '대기';
@@ -3606,6 +3641,159 @@ function openExpCopy(id) {
   openMo('mo-exp-add');
 }
 
+/* ═══════ (26_10_12_01) 은행명 표준화 · 자동완성 ═══════
+   code: 금융결제원 표준 은행코드 / keys: 줄여 쓰는 이름(공백·대소문자 무시)
+   같은 key가 여러 곳에 있으면(예: 하나 → 하나은행/하나증권) 목록에서 고르게 함 — 배열 순서가 1순위 */
+const BANKS = [
+  {code:'004', name:'국민은행',     keys:['국민','국민은행','kb국민','kb국민은행','kb']},
+  {code:'011', name:'농협은행',     keys:['농협','농협은행','nh농협','nh농협은행','nh','농협중앙회']},
+  {code:'012', name:'지역농축협',   keys:['농협','지역농협','단위농협','농축협','지역농축협','축협','nh']},
+  {code:'088', name:'신한은행',     keys:['신한','신한은행','조흥','조흥은행']},
+  {code:'020', name:'우리은행',     keys:['우리','우리은행']},
+  {code:'081', name:'하나은행',     keys:['하나','하나은행','keb하나','keb하나은행','외환','외환은행']},
+  {code:'003', name:'기업은행',     keys:['기업','기업은행','ibk','ibk기업','ibk기업은행','중소기업은행']},
+  {code:'023', name:'SC제일은행',   keys:['sc','제일','제일은행','sc제일','sc제일은행','스탠다드차타드']},
+  {code:'027', name:'씨티은행',     keys:['씨티','씨티은행','시티','시티은행','citi','한국씨티']},
+  {code:'002', name:'산업은행',     keys:['산업','산업은행','kdb','kdb산업']},
+  {code:'007', name:'수협은행',     keys:['수협','수협은행','sh수협']},
+  {code:'030', name:'수협중앙회',   keys:['수협','수협중앙회','지역수협']},
+  {code:'031', name:'iM뱅크',       keys:['대구','대구은행','im뱅크','아이엠뱅크','dgb','dgb대구']},
+  {code:'032', name:'부산은행',     keys:['부산','부산은행','bnk부산']},
+  {code:'039', name:'경남은행',     keys:['경남','경남은행','bnk경남']},
+  {code:'034', name:'광주은행',     keys:['광주','광주은행']},
+  {code:'037', name:'전북은행',     keys:['전북','전북은행']},
+  {code:'035', name:'제주은행',     keys:['제주','제주은행']},
+  {code:'071', name:'우체국',       keys:['우체국','우체국은행','우정사업본부']},
+  {code:'045', name:'새마을금고',   keys:['새마을','새마을금고','mg','mg새마을금고']},
+  {code:'048', name:'신협',         keys:['신협','신용협동조합']},
+  {code:'050', name:'저축은행',     keys:['저축은행','상호저축은행']},
+  {code:'064', name:'산림조합',     keys:['산림','산림조합']},
+  {code:'090', name:'카카오뱅크',   keys:['카카오','카카오뱅크','카뱅','kakao']},
+  {code:'089', name:'케이뱅크',     keys:['케이뱅크','k뱅크','kbank']},
+  {code:'092', name:'토스뱅크',     keys:['토스','토스뱅크','toss']},
+  {code:'218', name:'KB증권',       keys:['kb','kb증권','국민증권']},
+  {code:'247', name:'NH투자증권',   keys:['nh','nh투자','nh투자증권','농협증권']},
+  {code:'270', name:'하나증권',     keys:['하나','하나증권','하나금융투자']},
+  {code:'278', name:'신한투자증권', keys:['신한','신한투자','신한투자증권','신한금융투자','신한증권']},
+  {code:'240', name:'삼성증권',     keys:['삼성','삼성증권']},
+  {code:'238', name:'미래에셋증권', keys:['미래에셋','미래에셋증권','미래에셋대우']},
+  {code:'243', name:'한국투자증권', keys:['한국투자','한국투자증권','한투']},
+  {code:'264', name:'키움증권',     keys:['키움','키움증권']},
+  {code:'267', name:'대신증권',     keys:['대신','대신증권']},
+  {code:'209', name:'유안타증권',   keys:['유안타','유안타증권']},
+  {code:'261', name:'교보증권',     keys:['교보','교보증권']},
+  {code:'269', name:'한화투자증권', keys:['한화','한화투자','한화투자증권']},
+  {code:'287', name:'메리츠증권',   keys:['메리츠','메리츠증권']},
+  {code:'279', name:'DB금융투자',   keys:['db','db금융투자','db증권']},
+  {code:'266', name:'SK증권',       keys:['sk','sk증권']},
+  {code:'263', name:'현대차증권',   keys:['현대차','현대차증권']},
+  {code:'280', name:'유진투자증권', keys:['유진','유진투자','유진투자증권']},
+];
+function bankNorm(s){ return String(s||'').toLowerCase().replace(/\(주\)|주식회사|㈜/g,'').replace(/[\s.\-·()]/g,''); }
+function bankAllKeys(b){ return [bankNorm(b.name), ...b.keys]; }
+/* 정확히 매칭: match(1곳) / cands(여러 곳 — 선택 필요) */
+function bankResolve(raw){
+  const q = bankNorm(raw);
+  if(!q) return { match:null, cands:[] };
+  const byCode = BANKS.find(b => b.code === q);
+  if(byCode) return { match:byCode, cands:[byCode] };
+  let c = BANKS.filter(b => bankAllKeys(b).includes(q));
+  if(c.length === 1) return { match:c[0], cands:c };
+  if(c.length > 1)  return { match:null, cands:c };
+  // '농협은행 강남지점'·'국민은행(본점)'처럼 뒤에 말이 붙은 경우: 가장 길게 일치하는 표준명/키 기준
+  const pre = BANKS.map(b => ({ b, len: Math.max(0, ...bankAllKeys(b).filter(k => k.length >= 2 && q.startsWith(k)).map(k => k.length)) }))
+                   .filter(x => x.len > 0);
+  if(pre.length){
+    const top = Math.max(...pre.map(x => x.len));
+    c = pre.filter(x => x.len === top).map(x => x.b);
+    return c.length === 1 ? { match:c[0], cands:c } : { match:null, cands:c };
+  }
+  return { match:null, cands:[] };
+}
+/* 입력 중 추천 목록 */
+function bankSuggest(raw){
+  const q = bankNorm(raw);
+  if(!q) return [];
+  const r = bankResolve(raw);
+  if(r.cands.length > 1) return r.cands;
+  const out = BANKS.filter(b => bankAllKeys(b).some(k => k.includes(q)));
+  if(r.match && !out.includes(r.match)) out.unshift(r.match);
+  return out.slice(0, 8);
+}
+function bankSetField(name, code){
+  const el = document.getElementById('ef-bank'); if(!el) return;
+  el.value = name || '';
+  el.dataset.code = code || '';
+  if(name && !code){ const r = bankResolve(name); if(r.match && r.match.name === name) el.dataset.code = r.match.code; }
+  bankCloseDd(); bankHint(el);
+}
+function bankHint(el){
+  const h = document.getElementById('ef-bank-hint'); if(!h) return;
+  const v = el.value.trim();
+  h.classList.remove('warn');
+  if(!v){ h.textContent=''; return; }
+  if(el.dataset.code){ h.textContent = '은행코드 ' + el.dataset.code; return; }
+  const r = bankResolve(v);
+  if(r.match){ h.textContent = '→ ' + r.match.name + ' (' + r.match.code + ')'; return; }
+  if(r.cands.length > 1){ h.textContent = '여러 곳이 해당돼요 — 목록에서 선택해주세요'; h.classList.add('warn'); return; }
+  h.textContent = '등록되지 않은 은행명 — 입력한 그대로 저장됩니다'; h.classList.add('warn');
+}
+function bankCloseDd(){ const dd=document.getElementById('ef-bank-dd'); if(dd){ dd.classList.remove('open'); dd.innerHTML=''; dd._list=[]; dd._on=-1; } }
+function bankInput(el, onFocus){
+  if(!onFocus) el.dataset.code = '';
+  const dd = document.getElementById('ef-bank-dd'); if(!dd) return;
+  if(onFocus && el.dataset.code){ bankHint(el); return; }   // 이미 확정된 값은 포커스만으로 목록을 띄우지 않음
+  const v = el.value.trim();
+  const list = bankSuggest(v);
+  if(!list.length){ bankCloseDd(); bankHint(el); return; }
+  const amb = bankResolve(v).cands.length > 1;
+  dd._list = list; dd._on = -1;
+  dd.innerHTML = (amb ? '<div class="bk-dd-h">어느 곳인가요?</div>' : '') +
+    list.map((b,i)=>`<div class="bk-it" onmousedown="event.preventDefault();bankPick(${i})"><span>${b.name}</span><span class="bk-cd">${b.code}</span></div>`).join('');
+  dd.classList.add('open');
+  bankHint(el);
+}
+function bankPick(i){
+  const dd = document.getElementById('ef-bank-dd'); const b = dd && dd._list && dd._list[i]; if(!b) return;
+  bankSetField(b.name, b.code);
+}
+function bankKey(e, el){
+  const dd = document.getElementById('ef-bank-dd');
+  const open = !!(dd && dd.classList.contains('open') && dd._list && dd._list.length);
+  if(e.ctrlKey || e.metaKey || e.isComposing) return;   // 저장 단축키·한글 조합 중에는 관여하지 않음
+  if(e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+    if(!open){ bankInput(el, false); return; }
+    e.preventDefault();
+    const n = dd._list.length;
+    dd._on = e.key === 'ArrowDown' ? (dd._on + 1) % n : (dd._on - 1 + n) % n;
+    dd.querySelectorAll('.bk-it').forEach((x,i)=>x.classList.toggle('on', i===dd._on));
+  } else if(e.key === 'Enter'){
+    if(open){ e.preventDefault(); bankPick(dd._on >= 0 ? dd._on : 0); }
+  } else if(e.key === 'Escape'){
+    if(open){ e.preventDefault(); e.stopPropagation(); bankCloseDd(); }   // 목록만 닫고 창은 유지
+  }
+}
+/* 칸을 벗어나면: 한 곳으로 정해지면 자동 수정, 여러 곳이면 그대로 두고 경고 */
+function bankBlur(el){
+  bankCloseDd();
+  if(!el.dataset.code){
+    const r = bankResolve(el.value);
+    if(r.match){ el.value = r.match.name; el.dataset.code = r.match.code; }
+  }
+  bankHint(el);
+}
+/* 저장용 값 */
+function bankFieldValue(){
+  const el = document.getElementById('ef-bank');
+  const raw = el.value.trim();
+  if(!raw) return { name:'', code:'' };
+  if(el.dataset.code){ const b = BANKS.find(x=>x.code===el.dataset.code); return { name: b ? b.name : raw, code: el.dataset.code }; }
+  const r = bankResolve(raw);
+  if(r.match) return { name:r.match.name, code:r.match.code };
+  if(r.cands.length > 1) return { ambiguous:true, raw, cands:r.cands, name:raw, code:'' };
+  return { name:raw, code:'' };
+}
+
 function saveExp() {
   const draftDate = document.getElementById('ef-draft-date').value;
   const payDate   = document.getElementById('ef-pay-date').value;
@@ -3622,13 +3810,20 @@ function saveExp() {
   const careDays   = isWage ? parseFloat(document.getElementById('ef-care-days')?.value)||0 : 0;
   const expectedRev= isWage ? parseFloat(document.getElementById('ef-expected-rev')?.value)||0 : 0;
   const client     = isWage ? (document.getElementById('ef-client')?.value||'') : '';
+  // 은행명 표준화 (애매한 입력은 선택해야 저장)
+  const bk = bankFieldValue();
+  if(bk.ambiguous){
+    toast('은행을 목록에서 선택해주세요. ('+bk.raw+' → '+bk.cands.map(b=>b.name).join(' / ')+')','err');
+    const be=document.getElementById('ef-bank'); be.focus(); bankInput(be,false); return;
+  }
 
   const obj = {
     draftDate, payDate, title, payee,
     bizno:    document.getElementById('ef-bizno').value,
     acct, amount,
     method:   document.getElementById('ef-method').value,
-    bank:     document.getElementById('ef-bank').value,
+    bank:     bk.name,
+    bankCode: bk.code,
     account:  document.getElementById('ef-account').value,
     desc, status: document.getElementById('ef-status').value,
     note:     document.getElementById('ef-note').value,
