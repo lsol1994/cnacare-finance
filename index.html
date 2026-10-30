@@ -1073,7 +1073,7 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
   <div class="mbox" style="max-width:760px"><div class="mhandle"></div>
     <div class="mh"><div class="mt">대량이체 파일 만들기 <span style="font-size:11.5px;font-weight:500;color:var(--t3)">기업은행 양식</span></div><button class="mc" onclick="closeMo('mo-bulk-tr')">✕</button></div>
     <div class="fgrid">
-      <div class="fg"><label class="fl">입금통장 표시내용 <span style="color:var(--t3);font-weight:400">(받는 사람 통장, 한글 7자)</span></label><input type="text" class="fc" id="btr-in-memo" oninput="renderBulkTr()"></div>
+      <div class="fg"><label class="fl">입금통장 표시내용 <span style="color:var(--t3);font-weight:400">(받는 사람 통장, 한글 7자)</span></label><select class="fc" id="btr-in-memo" onchange="renderBulkTr()"><option>씨앤에이케어</option><option>이광우</option></select></div>
       <div class="fg"><label class="fl">출금통장 표시내용 <span style="color:var(--t3);font-weight:400">(우리 통장, 한글 7자)</span></label><select class="fc" id="btr-out-mode" onchange="renderBulkTr()"><option value="payee">수취인 이름</option><option value="title">지출결의서 제목</option></select></div>
     </div>
     <div class="pvw" id="btr-tbl" style="max-height:360px"></div>
@@ -1401,7 +1401,7 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
 <script>
 // ─── 앱 버전 / 새 버전 감지 ───
 // 배포마다 이 값과 저장소 루트의 version.txt를 같은 값으로 올려야 함 (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_30_01';
+const APP_BUILD = '26_10_30_02';
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
     .then(r => r.ok ? r.text() : null)
@@ -5489,8 +5489,7 @@ function openBulkTr(){
   btrRows = rows.map(t => { const c = bulkTrCheck(t); return { t, ...c, _checked: !c.err }; });
   const memo = document.getElementById('btr-in-memo');
   let saved = ''; try{ saved = localStorage.getItem('btrInMemo') || ''; }catch(e){}
-  const comp = (document.getElementById('sys-company')||{}).value || '';
-  memo.value = saved || cutBytes(comp, 14);
+  memo.value = [...memo.options].some(o => o.value === saved) ? saved : '씨앤에이케어';
   let om = ''; try{ om = localStorage.getItem('btrOutMode') || ''; }catch(e){}
   if(om) document.getElementById('btr-out-mode').value = om;
   renderBulkTr();
@@ -5528,7 +5527,7 @@ function buildBulkTrAoa(sel, inMemo, outMode){
   return [head, ...sel.map(r => [
     r.code, r.acc, cutBytes(r.t.payee, 20), r.amt,
     cutBytes(outMode === 'title' ? r.t.title : r.t.payee, 14),
-    cutBytes(inMemo, 14), '', cutBytes(r.t.title, 20), cutBytes(String(r.t.id), 20)
+    cutBytes(inMemo, 14), '', '', ''
   ])];
 }
 function downloadBulkTr(){
