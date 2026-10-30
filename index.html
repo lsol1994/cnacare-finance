@@ -1073,7 +1073,7 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
   <div class="mbox" style="max-width:760px"><div class="mhandle"></div>
     <div class="mh"><div class="mt">대량이체 파일 만들기 <span style="font-size:11.5px;font-weight:500;color:var(--t3)">기업은행 양식</span></div><button class="mc" onclick="closeMo('mo-bulk-tr')">✕</button></div>
     <div class="fgrid">
-      <div class="fg"><label class="fl">입금통장 표시내용 <span style="color:var(--t3);font-weight:400">(받는 사람 통장, 한글 7자)</span></label><select class="fc" id="btr-in-memo" onchange="renderBulkTr()"><option>씨앤에이케어</option><option>이광우</option></select></div>
+      <div class="fg"><label class="fl">입금통장 표시내용 <span style="color:var(--t3);font-weight:400">(받는 사람 통장, 고정)</span></label><input type="text" class="fc" id="btr-in-memo" value="cnacare/이광우" readonly style="background:var(--sf2)"></div>
       <div class="fg"><label class="fl">출금통장 표시내용 <span style="color:var(--t3);font-weight:400">(우리 통장, 한글 7자)</span></label><select class="fc" id="btr-out-mode" onchange="renderBulkTr()"><option value="payee">수취인 이름</option><option value="title">지출결의서 제목</option></select></div>
     </div>
     <div class="pvw" id="btr-tbl" style="max-height:360px"></div>
@@ -1401,7 +1401,7 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
 <script>
 // ─── 앱 버전 / 새 버전 감지 ───
 // 배포마다 이 값과 저장소 루트의 version.txt를 같은 값으로 올려야 함 (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_30_02';
+const APP_BUILD = '26_10_30_03';
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
     .then(r => r.ok ? r.text() : null)
@@ -5469,6 +5469,7 @@ function cutBytes(s, max){
   return out;
 }
 let btrRows = [];
+const BTR_IN_MEMO = 'cnacare/이광우';   // 입금통장 표시내용 고정 (14byte)
 function bulkTrCheck(t){
   const method = t.method || '계좌이체';
   if(method !== '계좌이체') return { err:'지급방법 ' + method };
@@ -5487,9 +5488,7 @@ function openBulkTr(){
   const rows = expTodayRows();
   if(!rows.length){ toast('오늘 지급할 건이 없습니다.', 'err'); return; }
   btrRows = rows.map(t => { const c = bulkTrCheck(t); return { t, ...c, _checked: !c.err }; });
-  const memo = document.getElementById('btr-in-memo');
-  let saved = ''; try{ saved = localStorage.getItem('btrInMemo') || ''; }catch(e){}
-  memo.value = [...memo.options].some(o => o.value === saved) ? saved : '씨앤에이케어';
+  document.getElementById('btr-in-memo').value = BTR_IN_MEMO;
   let om = ''; try{ om = localStorage.getItem('btrOutMode') || ''; }catch(e){}
   if(om) document.getElementById('btr-out-mode').value = om;
   renderBulkTr();
@@ -5498,7 +5497,7 @@ function openBulkTr(){
 function bulkTrOutMemo(r){ return cutBytes(document.getElementById('btr-out-mode').value === 'title' ? r.t.title : r.t.payee, 14); }
 function renderBulkTr(){
   const box = document.getElementById('btr-tbl'); if(!box) return;
-  const inMemo = cutBytes(document.getElementById('btr-in-memo').value, 14);
+  const inMemo = cutBytes(BTR_IN_MEMO, 14);
   const ok = btrRows.filter(r => !r.err);
   box.innerHTML = `<table><thead><tr>
     <th style="width:28px;text-align:center"><input type="checkbox" ${ok.length && ok.every(r=>r._checked)?'checked':''} ${ok.length?'':'disabled'} onchange="bulkTrToggleAll(this.checked)"></th>
@@ -5533,9 +5532,9 @@ function buildBulkTrAoa(sel, inMemo, outMode){
 function downloadBulkTr(){
   const sel = btrRows.filter(r => r._checked && !r.err);
   if(!sel.length){ toast('선택된 이체건이 없습니다.', 'err'); return; }
-  const inMemo = cutBytes(document.getElementById('btr-in-memo').value, 14);
+  const inMemo = cutBytes(BTR_IN_MEMO, 14);
   const outMode = document.getElementById('btr-out-mode').value;
-  try{ localStorage.setItem('btrInMemo', document.getElementById('btr-in-memo').value.trim()); localStorage.setItem('btrOutMode', outMode); }catch(e){}
+  try{ localStorage.setItem('btrOutMode', outMode); }catch(e){}
   const aoa = buildBulkTrAoa(sel, inMemo, outMode);
   const ws = XLSX.utils.aoa_to_sheet(aoa);
   // 금액(D열)만 숫자, 나머지는 텍스트 — 계좌·은행코드 앞자리 0 보존
