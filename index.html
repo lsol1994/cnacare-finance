@@ -767,7 +767,7 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
 <div id="p-exp-today" class="page">
   <div class="ph">
     <div><div class="ph-t">오늘 지급 예정</div><div class="ph-s" id="exp-today-date"></div></div>
-    <div class="ab"><button class="btn sm" onclick="openExpAdd()">＋ 지출결의서 작성</button></div>
+    <div class="ab"><button class="btn sm" onclick="openBulkTr()">🏦 대량이체 파일</button><button class="btn sm" onclick="openExpAdd()">＋ 지출결의서 작성</button></div>
   </div>
   <div class="stats" id="exp-today-stats"></div>
   <div class="card">
@@ -1066,6 +1066,20 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
     <div class="upinfo">ℹ️ 신한은행 → 거래내역조회 → <strong>엑셀저장(.xls)</strong></div>
     <div id="bank-pvw" style="display:none"><div class="dv"></div><div style="font-size:12.5px;font-weight:600;margin-bottom:6px" id="bank-pvw-cnt"></div><div class="pvw" id="bank-pvw-tbl"></div><div class="mft"><button class="btn" onclick="closeMo('mo-bank-up')">취소</button><button class="btn p" onclick="importBank()">✓ 가져오기</button></div></div>
     <div id="bank-err" style="display:none;color:var(--R);font-size:12px;margin-top:8px;padding:8px;background:var(--RL);border-radius:var(--r2)"></div>
+  </div>
+</div>
+<!-- 오늘 지급 예정 → 기업은행 대량이체 파일 -->
+<div class="mo" id="mo-bulk-tr">
+  <div class="mbox" style="max-width:760px"><div class="mhandle"></div>
+    <div class="mh"><div class="mt">대량이체 파일 만들기 <span style="font-size:11.5px;font-weight:500;color:var(--t3)">기업은행 양식</span></div><button class="mc" onclick="closeMo('mo-bulk-tr')">✕</button></div>
+    <div class="fgrid">
+      <div class="fg"><label class="fl">입금통장 표시내용 <span style="color:var(--t3);font-weight:400">(받는 사람 통장, 한글 7자)</span></label><input type="text" class="fc" id="btr-in-memo" oninput="renderBulkTr()"></div>
+      <div class="fg"><label class="fl">출금통장 표시내용 <span style="color:var(--t3);font-weight:400">(우리 통장, 한글 7자)</span></label><select class="fc" id="btr-out-mode" onchange="renderBulkTr()"><option value="payee">수취인 이름</option><option value="title">지출결의서 제목</option></select></div>
+    </div>
+    <div class="pvw" id="btr-tbl" style="max-height:360px"></div>
+    <div id="btr-warn" style="display:none;font-size:11.5px;color:var(--R);margin-top:8px;padding:8px;background:var(--RL);border-radius:var(--r2)"></div>
+    <div class="upinfo">ℹ️ 기업은행 → 이체 → 대량이체 → <strong>파일 불러오기</strong>에 그대로 올리면 돼요. 받은 파일은 지급 상태를 바꾸지 않으니, 이체 후 <strong>💰 지급</strong>을 눌러 주세요.</div>
+    <div class="mft" style="align-items:center"><div id="btr-sum" style="margin-right:auto;font-size:12.5px;font-weight:600"></div><button class="btn" onclick="closeMo('mo-bulk-tr')">취소</button><button class="btn p" id="btr-dl" onclick="downloadBulkTr()">⬇ 엑셀 받기</button></div>
   </div>
 </div>
 <!-- 입출금 추가/수정 -->
@@ -1387,7 +1401,7 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
 <script>
 // ─── 앱 버전 / 새 버전 감지 ───
 // 배포마다 이 값과 저장소 루트의 version.txt를 같은 값으로 올려야 함 (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_12_04';
+const APP_BUILD = '26_10_30_01';
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
     .then(r => r.ok ? r.text() : null)
@@ -3402,7 +3416,7 @@ function renderDashboard() {
     <div class="sc"><div class="sc-l">지출결의서</div><div class="sc-v exp">₩${fmt(totExpAmt)}</div><div class="sc-s">${expY.length}건</div></div>`;
  
   // 오늘 지급 예정 지출결의서
-  const today = new Date().toISOString().slice(0,10);
+  const today = todayLocal();
   document.getElementById('db-today-label').textContent = today;
   const todayExp = expReqs.filter(t=>t.payDate===today && t.status!=='지급완료' && t.status!=='반려');
   const todayWrap = document.getElementById('db-today-exp-wrap');
@@ -3614,7 +3628,7 @@ function openExpAdd(id) {
   editExpId = id||null;
   const t = id ? expReqs.find(x=>x.id==id) : null;
   document.getElementById('me-title').textContent = id ? '지출결의서 수정' : '지출결의서 작성';
-  const today = new Date().toISOString().slice(0,10);
+  const today = todayLocal();
   document.getElementById('ef-draft-date').value = t ? t.draftDate : today;
   document.getElementById('ef-pay-date').value   = t ? t.payDate   : today;
   document.getElementById('ef-title').value      = t ? t.title  : '';
@@ -3649,7 +3663,7 @@ function openExpCopy(id) {
   const t = expReqs.find(x=>x.id==id);
   if(!t) return;
   editExpId = null;
-  const today = new Date().toISOString().slice(0,10);
+  const today = todayLocal();
   document.getElementById('me-title').textContent = '지출결의서 복사 작성';
   document.getElementById('ef-draft-date').value = today;
   document.getElementById('ef-pay-date').value   = today;
@@ -5411,10 +5425,10 @@ function renderExp() {
 }
  
 function renderExpToday() {
-  const today = new Date().toISOString().slice(0,10);
+  const today = todayLocal();
   const el = document.getElementById('exp-today-date');
   if(el) el.textContent = today + ' 기준';
-  const rows = expReqs.filter(t=>t.payDate===today && t.status!=='지급완료' && t.status!=='반려');
+  const rows = expTodayRows();
   const tb=document.getElementById('exp-today-tbody');
   const ca=document.getElementById('exp-today-cards');
   const em=document.getElementById('exp-today-empty');
@@ -5445,6 +5459,99 @@ function renderExpToday() {
   </div>`).join('');
 }
  
+/* ═══════ 오늘 지급 예정 → 기업은행 대량이체 파일 ═══════ */
+function todayLocal(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function expTodayRows(){ const today=todayLocal(); return expReqs.filter(t=>t.payDate===today && t.status!=='지급완료' && t.status!=='반려'); }
+/* 은행 양식 길이(Byte) 기준: 한글 2byte, 영문·숫자 1byte */
+function cutBytes(s, max){
+  let out='', n=0;
+  for(const ch of String(s||'').trim()){ const b = ch.charCodeAt(0) > 127 ? 2 : 1; if(n+b > max) break; out+=ch; n+=b; }
+  return out;
+}
+let btrRows = [];
+function bulkTrCheck(t){
+  const method = t.method || '계좌이체';
+  if(method !== '계좌이체') return { err:'지급방법 ' + method };
+  let code = t.bankCode || '';
+  if(!code && t.bank){ const r = bankResolve(t.bank); if(r.match) code = r.match.code; }
+  if(!t.bank && !code) return { err:'은행 없음' };
+  if(!code) return { err:'은행코드 확인 필요 (' + t.bank + ')' };
+  const acc = String(t.account||'').replace(/\D/g,'');
+  if(!acc) return { err:'계좌번호 없음', code };
+  if(acc.length < 8 || acc.length > 16) return { err:'계좌번호 자릿수 확인 (' + acc.length + '자리)', code, acc };
+  const amt = Math.round(Number(t.amount)||0);
+  if(amt <= 0) return { err:'금액 없음', code, acc };
+  return { code, acc, amt };
+}
+function openBulkTr(){
+  const rows = expTodayRows();
+  if(!rows.length){ toast('오늘 지급할 건이 없습니다.', 'err'); return; }
+  btrRows = rows.map(t => { const c = bulkTrCheck(t); return { t, ...c, _checked: !c.err }; });
+  const memo = document.getElementById('btr-in-memo');
+  let saved = ''; try{ saved = localStorage.getItem('btrInMemo') || ''; }catch(e){}
+  const comp = (document.getElementById('sys-company')||{}).value || '';
+  memo.value = saved || cutBytes(comp, 14);
+  let om = ''; try{ om = localStorage.getItem('btrOutMode') || ''; }catch(e){}
+  if(om) document.getElementById('btr-out-mode').value = om;
+  renderBulkTr();
+  openMo('mo-bulk-tr');
+}
+function bulkTrOutMemo(r){ return cutBytes(document.getElementById('btr-out-mode').value === 'title' ? r.t.title : r.t.payee, 14); }
+function renderBulkTr(){
+  const box = document.getElementById('btr-tbl'); if(!box) return;
+  const inMemo = cutBytes(document.getElementById('btr-in-memo').value, 14);
+  const ok = btrRows.filter(r => !r.err);
+  box.innerHTML = `<table><thead><tr>
+    <th style="width:28px;text-align:center"><input type="checkbox" ${ok.length && ok.every(r=>r._checked)?'checked':''} ${ok.length?'':'disabled'} onchange="bulkTrToggleAll(this.checked)"></th>
+    <th>수취인</th><th>제목</th><th>은행</th><th>계좌번호</th><th style="text-align:right">금액</th><th>출금통장 표시</th>
+  </tr></thead><tbody>${btrRows.map((r,i)=>`<tr style="${r.err?'opacity:.55':''}">
+    <td style="text-align:center"><input type="checkbox" ${r._checked?'checked':''} ${r.err?'disabled':''} onchange="bulkTrToggle(${i},this.checked)"></td>
+    <td>${r.t.payee||'-'}</td>
+    <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.t.title||''}</td>
+    <td>${r.err && !r.code ? '<span style="color:var(--R)">'+r.err+'</span>' : (r.t.bank||'')+' <span style="color:var(--t3)">'+(r.code||'')+'</span>'}</td>
+    <td class="dn">${r.err && r.code ? '<span style="color:var(--R)">'+r.err+'</span>' : (r.acc||'')}</td>
+    <td style="text-align:right" class="nm">${fmt(Math.round(Number(r.t.amount)||0))}</td>
+    <td style="color:var(--t3)">${r.err?'':bulkTrOutMemo(r)}</td>
+  </tr>`).join('')}</tbody></table>`;
+  const bad = btrRows.filter(r => r.err);
+  const w = document.getElementById('btr-warn');
+  if(bad.length){ w.style.display=''; w.innerHTML = '⚠️ ' + bad.length + '건은 파일에서 빠져요. 지출결의서에서 은행·계좌를 고친 뒤 다시 열어 주세요: ' + bad.map(r => (r.t.payee||r.t.title) + '(' + r.err + ')').join(', '); }
+  else w.style.display='none';
+  const sel = btrRows.filter(r => r._checked);
+  document.getElementById('btr-sum').innerHTML = `선택 ${sel.length}건 · <span style="color:var(--R)">₩${fmt(sel.reduce((s,r)=>s+r.amt,0))}</span>` + (inMemo ? ` <span style="font-weight:400;color:var(--t3)">· 입금통장 표시 "${inMemo}"</span>` : '');
+  document.getElementById('btr-dl').disabled = !sel.length;
+}
+function bulkTrToggle(i, on){ if(btrRows[i] && !btrRows[i].err) btrRows[i]._checked = on; renderBulkTr(); }
+function bulkTrToggleAll(on){ btrRows.forEach(r => { if(!r.err) r._checked = on; }); renderBulkTr(); }
+function buildBulkTrAoa(sel, inMemo, outMode){
+  const head = ['*입금은행','*입금계좌','고객관리성명','*입금액','출금통장표시내용','입금통장표시내용','입금인코드','비고','업체사용key'];
+  return [head, ...sel.map(r => [
+    r.code, r.acc, cutBytes(r.t.payee, 20), r.amt,
+    cutBytes(outMode === 'title' ? r.t.title : r.t.payee, 14),
+    cutBytes(inMemo, 14), '', cutBytes(r.t.title, 20), cutBytes(String(r.t.id), 20)
+  ])];
+}
+function downloadBulkTr(){
+  const sel = btrRows.filter(r => r._checked && !r.err);
+  if(!sel.length){ toast('선택된 이체건이 없습니다.', 'err'); return; }
+  const inMemo = cutBytes(document.getElementById('btr-in-memo').value, 14);
+  const outMode = document.getElementById('btr-out-mode').value;
+  try{ localStorage.setItem('btrInMemo', document.getElementById('btr-in-memo').value.trim()); localStorage.setItem('btrOutMode', outMode); }catch(e){}
+  const aoa = buildBulkTrAoa(sel, inMemo, outMode);
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  // 금액(D열)만 숫자, 나머지는 텍스트 — 계좌·은행코드 앞자리 0 보존
+  for(let R=0; R<aoa.length; R++) for(let C=0; C<9; C++){
+    const ref = XLSX.utils.encode_cell({r:R, c:C}); const cell = ws[ref]; if(!cell) continue;
+    if(R>0 && C===3){ cell.t='n'; cell.z='0'; } else { cell.t='s'; cell.v=String(cell.v); cell.z='@'; }
+  }
+  ws['!cols'] = [{wch:9},{wch:18},{wch:12},{wch:12},{wch:16},{wch:16},{wch:12},{wch:22},{wch:16}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '입력정보');
+  const d = todayLocal().replace(/-/g,'');
+  XLSX.writeFile(wb, `대량이체_${d}_${sel.length}건.xlsx`);
+  toast(`대량이체 파일 ${sel.length}건 · ₩${fmt(sel.reduce((s,r)=>s+r.amt,0))}`, 'ok');
+}
+
 function renderExpStats(rows, elId) {
   const el=document.getElementById(elId); if(!el) return;
   const tot=rows.reduce((s,t)=>s+t.amount,0);
@@ -7027,7 +7134,7 @@ function updBadges() {
   if(nc) nc.textContent=cards.length;
   if(ne) ne.textContent=expReqs.length;
   // 오늘 지급 예정 (대기+승인)
-  const today=new Date().toISOString().slice(0,10);
+  const today=todayLocal();
   const todayCnt=expReqs.filter(t=>t.payDate===today&&t.status!=='지급완료'&&t.status!=='반려').length;
   if(net){ net.textContent=todayCnt; net.style.display=todayCnt?'':'none'; }
 }
