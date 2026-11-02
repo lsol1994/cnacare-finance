@@ -1361,7 +1361,7 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
     <div class="mh"><div class="mt">⚠️ 입출금내역 미등록</div></div>
     <div style="padding:4px 2px 12px;font-size:13.5px;line-height:1.7;color:var(--t2)">
       오늘은 이번 달 첫 영업일입니다.<br>
-      <b id="msa-label"></b>(<b id="msa-date"></b>)자 입출금내역이 아직 등록되지 않았습니다.<br>
+      <b id="msa-label"></b>(<b id="msa-date"></b>) 이후 입출금내역이 아직 등록되지 않았습니다.<br>
       입출금내역 업로드 및 정리를 완료한 후 다시 접속해주세요.
     </div>
     <div class="mft"><button class="btn p" onclick="confirmMonthStartAlert()">확인</button></div>
@@ -1401,7 +1401,7 @@ tfoot tr td{padding:9px 10px;font-weight:700;font-size:12.5px;background:var(--s
 <script>
 // ─── 앱 버전 / 새 버전 감지 ───
 // 배포마다 이 값과 저장소 루트의 version.txt를 같은 값으로 올려야 함 (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_30_03';
+const APP_BUILD = '26_11_02_01';
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
     .then(r => r.ok ? r.text() : null)
@@ -4552,7 +4552,8 @@ function renderCurrentProfit(d) {
 /* ══════════════════════════════
    월초 첫 영업일 안내 팝업 — 지난달 현재순이익
    - 매달 첫 영업일(주말이면 다음 월요일)에 접속 시 체크
-   - 우선순위: 지난달 마지막 날짜 입출금내역이 없으면 "미등록 알림"만 노출(순이익 팝업은 뜨지 않음)
+   - 우선순위: 지난달 마지막 날짜 "이후"(말일 포함) 입출금내역이 하나도 없으면 "미등록 알림"만 노출(순이익 팝업은 뜨지 않음)
+     · 말일이 주말·공휴일이라 그날 거래가 없을 수 있으므로, 말일 다음 날 이후 내역이 등록돼 있으면 등록 완료로 본다
      → 등록 완료된 경우에만 지난달 현재순이익 안내 팝업 노출
    - "확인" 버튼을 눌러야만 종료(브라우저별 로컬 저장) — 그 전까지는 재접속 시 계속 노출
    ══════════════════════════════ */
@@ -4578,6 +4579,11 @@ function getPrevMonthRange(year, monthIdx0) {
   return { y: py, m: pm+1, start, end };
 }
 /* calcFSData와 동일한 P&L 공식(calcPL)을 화면 상태와 무관하게 호출 — 월초 팝업·안내문 용 */
+/* 말일(dateISO) 당일 또는 그 이후 날짜의 입출금내역이 하나라도 있는지 — 지난달 입출금내역 등록 완료 여부의 대리 지표
+   말일이 쉬는 날이라 그날 거래가 없어도, 이후 날짜 내역이 올라와 있으면 이미 그 달까지 업로드된 것으로 판단 */
+function hasLedgerOnOrAfter(dateISO) {
+  return ledger.some(t => (t.date || '') >= dateISO);
+}
 function calcNetIncomeForRange(start, end) {
   return calcPL(start, end);
 }
@@ -4594,7 +4600,7 @@ function checkMonthStartNotice() {
 function renderMonthStartPopup() {
   const now = new Date();
   const prev = getPrevMonthRange(now.getFullYear(), now.getMonth());
-  const hasPrevEnd = ledger.some(t => t.date === prev.end);   // 지난달 마지막 날짜 거래 존재 여부 = 지난달 입출금내역 등록 완료 여부의 대리 지표
+  const hasPrevEnd = hasLedgerOnOrAfter(prev.end);   // 지난달 말일 당일 또는 이후 거래 존재 여부 = 지난달 입출금내역 등록 완료 여부의 대리 지표
 
   // ① 지난달 입출금내역이 아직 등록되지 않은 경우 → 미등록 알림만 노출 (순이익 팝업은 노출하지 않음)
   //    이 알림은 "확인"을 눌러도 별도 플래그를 남기지 않아, 데이터가 실제 등록될 때까지 접속할 때마다 계속 노출됨
@@ -4681,7 +4687,7 @@ function renderProfitNotice() {
   let msg = '';
   if(selYM > curYM)       msg = '아직 오지 않은 달이라 계산할 데이터가 없습니다.';
   else if(selYM === curYM) msg = '이번 달은 아직 진행 중이라 금액이 계속 바뀝니다. 월이 끝난 뒤 다시 확인하세요.';
-  else if(!ledger.some(t => t.date === lastDayISO)) msg = `${m}월 마지막 날(${lastDayISO.replace(/-/g,'.')}) 입출금내역이 없습니다. 입출금내역이 다 등록되지 않았을 수 있어요.`;
+  else if(!hasLedgerOnOrAfter(lastDayISO)) msg = `${m}월 마지막 날(${lastDayISO.replace(/-/g,'.')}) 이후 입출금내역이 없습니다. 입출금내역이 다 등록되지 않았을 수 있어요.`;
   warn.textContent = msg ? '⚠️ ' + msg : '';
   warn.style.display = msg ? 'block' : 'none';
   document.getElementById('pn-text').value = buildProfitNoticeText(y, m);
@@ -4725,7 +4731,7 @@ function testMonthStartNotice() {
   const isProfit = renderMonthStartPopup();
   toast(isProfit
     ? '테스트 미리보기: 지난달 실제 데이터로 계산된 순이익 팝업입니다.'
-    : '테스트 미리보기: 지난달 마지막 날짜 입출금내역이 없어 미등록 알림이 표시됩니다.', isProfit ? 'ok' : '');
+    : '테스트 미리보기: 지난달 마지막 날짜 이후 입출금내역이 없어 미등록 알림이 표시됩니다.', isProfit ? 'ok' : '');
 }
 /* 설정 > 데이터 정비: "오늘 이미 확인함" 로컬 플래그만 제거 (지난달 데이터 자체는 건드리지 않음) */
 function resetMonthStartConfirm() {
